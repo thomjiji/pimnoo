@@ -1,6 +1,7 @@
-export const FRONT_SAMPLE_CHARS = 4500;
-export const BACK_SAMPLE_CHARS = 1500;
-export const MAX_TITLE_CHARS = 60;
+export const CONVERSATION_SAMPLE_MAX_CHARS = 4000;
+export const MAX_TITLE_CHARS = 40;
+export const USER_MESSAGE_SAMPLE_CHARS = 1400;
+export const ASSISTANT_MESSAGE_SAMPLE_CHARS = 500;
 export const TITLE_TIMEOUT_MS = 30_000;
 export const DEFAULT_TITLE_MODELS = ["deepseek/deepseek-v4-flash", "openai-codex/gpt-5.6-luna"] as const;
 
@@ -32,6 +33,83 @@ export const formatSessionTimestamp = (timestamp: string): string | undefined =>
 };
 
 export { extractText } from "../shared/text.ts";
+
+export type ConversationMessage = {
+	role: "user" | "assistant";
+	text: string;
+};
+
+const clipFragment = (text: string, maxChars: number): string => {
+	const omitted = " [...] ";
+	const available = Math.max(0, maxChars - omitted.length);
+	const front = Math.ceil(available / 2);
+	const back = Math.floor(available / 2);
+	return `${text.slice(0, front).trimEnd()}${omitted}${text.slice(text.length - back).trimStart()}`;
+};
+
+const clipMessage = (text: string, maxChars: number): string => {
+	if (text.length <= maxChars) {
+		return text;
+	}
+
+	const paragraphs = text
+		.split(/\n\s*\n/)
+		.map((paragraph) => paragraph.trim())
+		.filter((paragraph) => paragraph.length > 0);
+	if (paragraphs.length < 2) {
+		return clipFragment(text, maxChars);
+	}
+
+	const omitted = "\n\n[...paragraphs omitted...]\n\n";
+	const available = Math.max(0, maxChars - omitted.length);
+	const firstBudget = Math.ceil(available / 2);
+	const lastBudget = Math.floor(available / 2);
+	const first = paragraphs[0].length <= firstBudget ? paragraphs[0] : clipFragment(paragraphs[0], firstBudget);
+	const last = paragraphs.at(-1)!;
+	const clippedLast = last.length <= lastBudget ? last : clipFragment(last, lastBudget);
+	return `${first}${omitted}${clippedLast}`;
+};
+
+/**
+ * Selects the conversation context most useful for naming a session.
+ *
+ * The first and latest user messages carry the strongest signal about the
+ * session's topic and current goal. Assistant messages provide context only
+ * after those anchors have been selected. Selected messages remain in their
+ * original order, with explicit markers for omitted messages.
+ */
+export const buildConversationSample = (messages: readonly ConversationMessage[]): string => {
+	const visible = messages
+		.map((message) => ({ ...message, text: message.text.trim() }))
+		.filter((message) => message.text.length > 0);
+	if (!visible.some((message) => message.role === "user")) {
+		return "";
+	}
+
+	const firstUser = visible.findIndex((message) => message.role === "user");
+	const latestUser = visible.findLastIndex((message) => message.role === "user");
+	const firstAssistant = visible.findIndex((message) => message.role === "assistant");
+	const latestAssistant = visible.findLastIndex((message) => message.role === "assistant");
+	const selectedIndexes = new Set(
+		[firstUser, latestUser, latestAssistant, firstAssistant].filter((index) => index >= 0),
+	);
+	const selected = [...selectedIndexes].sort((a, b) => a - b);
+
+	const parts: string[] = [];
+	let previousIndex = -1;
+	for (const index of selected) {
+		if (previousIndex >= 0 && index > previousIndex + 1) {
+			parts.push("[...messages omitted...]");
+		}
+
+		const message = visible[index];
+		const maxChars = message.role === "user" ? USER_MESSAGE_SAMPLE_CHARS : ASSISTANT_MESSAGE_SAMPLE_CHARS;
+		parts.push(`${message.role === "user" ? "User" : "Assistant"}: ${clipMessage(message.text, maxChars)}`);
+		previousIndex = index;
+	}
+
+	return parts.join("\n\n");
+};
 
 export const cleanTitle = (raw: string): string | undefined => {
 	let t = raw.trim();

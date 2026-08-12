@@ -30,12 +30,12 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
-	BACK_SAMPLE_CHARS,
+	buildConversationSample as buildSampleFromMessages,
 	cleanTitle,
+	type ConversationMessage,
 	DEFAULT_TITLE_MODELS,
 	extractText,
 	formatSessionTimestamp,
-	FRONT_SAMPLE_CHARS,
 	TITLE_TIMEOUT_MS,
 	withTimeout,
 } from "./helpers.ts";
@@ -44,9 +44,8 @@ const STATE_ENTRY_TYPE = "auto-title-state";
 
 type TitleState = { disabled?: boolean };
 
-const buildConversationSample = (ctx: ExtensionContext): string => {
-	const lines: string[] = [];
-	let hasUserText = false;
+const getConversationSample = (ctx: ExtensionContext): string => {
+	const messages: ConversationMessage[] = [];
 
 	for (const entry of ctx.sessionManager.getBranch()) {
 		if (entry.type !== "message") {
@@ -59,31 +58,12 @@ const buildConversationSample = (ctx: ExtensionContext): string => {
 		}
 
 		const text = extractText(entry.message.content).trim();
-		if (!text) {
-			continue;
+		if (text) {
+			messages.push({ role, text });
 		}
-
-		if (role === "user") {
-			hasUserText = true;
-		}
-
-		lines.push(`${role === "user" ? "User" : "Assistant"}: ${text}`);
 	}
 
-	if (!hasUserText) {
-		return "";
-	}
-
-	const full = lines.join("\n\n");
-	if (full.length <= FRONT_SAMPLE_CHARS + BACK_SAMPLE_CHARS) {
-		return full;
-	}
-
-	return (
-		full.slice(0, FRONT_SAMPLE_CHARS) +
-		"\n\n[...]\n\n" +
-		full.slice(full.length - BACK_SAMPLE_CHARS)
-	);
+	return buildSampleFromMessages(messages);
 };
 
 export default function (pi: ExtensionAPI) {
@@ -282,7 +262,7 @@ export default function (pi: ExtensionAPI) {
 			if (!sessionTimestamp || !formatSessionTimestamp(sessionTimestamp)) {
 				return; // persisted sessions should always have a valid header timestamp
 			}
-			sample = buildConversationSample(ctx);
+			sample = getConversationSample(ctx);
 			if (!sample) {
 				return; // no conversation yet
 			}

@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+	buildConversationSample,
 	cleanTitle,
+	CONVERSATION_SAMPLE_MAX_CHARS,
 	DEFAULT_TITLE_MODELS,
 	extractText,
 	formatSessionTimestamp,
@@ -13,7 +15,41 @@ test("normalizes generated titles to sentence case and a bounded length", () => 
 	assert.equal(cleanTitle("```\n  \"FIX THE LOGIN BUG!!!\"\n```\nignored"), "Fix the login bug");
 	assert.equal(cleanTitle("  multiple   words\nsecond line"), "Multiple words");
 	assert.equal(cleanTitle("   ... !!!   "), undefined);
-	assert.equal(cleanTitle("A".repeat(80))?.length, 60);
+	assert.equal(cleanTitle("A".repeat(80))?.length, 40);
+});
+
+test("keeps the first and latest user goals while bounding conversation context", () => {
+	const sample = buildConversationSample([
+		{ role: "user", text: "First goal" },
+		{ role: "assistant", text: "First answer" },
+		{ role: "user", text: "An intermediate request that should not dominate the title" },
+		{ role: "assistant", text: "A long intermediate answer that should be omitted" },
+		{ role: "user", text: "Latest goal" },
+		{ role: "assistant", text: "Latest answer" },
+	]);
+
+	assert.equal(
+		sample,
+		"User: First goal\n\nAssistant: First answer\n\n[...messages omitted...]\n\nUser: Latest goal\n\nAssistant: Latest answer",
+	);
+	assert.equal(sample.includes("intermediate"), false);
+});
+
+test("clips long messages at paragraph boundaries within the sample budget", () => {
+	const sample = buildConversationSample([
+		{ role: "user", text: `first start\n\n${"x".repeat(5000)}\n\nfirst end` },
+		{ role: "assistant", text: "first answer" },
+		{ role: "user", text: `latest start\n\n${"y".repeat(5000)}\n\nlatest end` },
+		{ role: "assistant", text: "latest answer" },
+	]);
+
+	assert.ok(sample.length <= CONVERSATION_SAMPLE_MAX_CHARS);
+	assert.match(sample, /first start/);
+	assert.match(sample, /first end/);
+	assert.match(sample, /latest start/);
+	assert.match(sample, /latest end/);
+	assert.doesNotMatch(sample, /x{100}/);
+	assert.doesNotMatch(sample, /y{100}/);
 });
 
 test("formats persisted session timestamps and rejects invalid dates", () => {
