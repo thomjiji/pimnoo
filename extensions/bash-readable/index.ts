@@ -18,17 +18,20 @@ import { formatShellCommand } from "./format.ts";
 export default function readableBashExtension(pi: ExtensionAPI) {
 	// Match Pi's built-in tool behavior and delegate execution to it. The
 	// extension changes only renderCall, so output, timeouts, cancellation, and
-	// truncation keep the built-in implementation.
-	const originalBash = createBashTool(process.cwd());
+	// truncation keep the built-in implementation. Keep this instance only for
+	// static metadata: an extension can run in a child session whose cwd differs
+	// from process.cwd() (for example, a subagent worktree).
+	const bashMetadata = createBashTool(".");
 
 	pi.registerTool({
 		name: "bash",
 		label: "bash",
-		description: originalBash.description,
-		parameters: originalBash.parameters,
+		description: bashMetadata.description,
+		parameters: bashMetadata.parameters,
 
-		async execute(toolCallId, params, signal, onUpdate) {
-			return originalBash.execute(toolCallId, params, signal, onUpdate);
+		async execute(toolCallId, params, signal, onUpdate, ctx) {
+			const bash = createBashTool(ctx.cwd);
+			return bash.execute(toolCallId, params, signal, onUpdate, ctx);
 		},
 
 		renderCall(args, theme) {

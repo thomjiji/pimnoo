@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { formatShellCommand, splitShellCommand } from "../extensions/bash-readable/format.ts";
 
 test("splits top-level chaining operators but keeps pipelines inline", () => {
@@ -31,4 +32,10 @@ test("preserves multiline command lines and continuation prompts", () => {
 		"> echo two &&",
 		"> echo three",
 	]);
+});
+
+test("resolves bash execution from the active session cwd", async () => {
+	const source = await readFile(new URL("../extensions/bash-readable/index.ts", import.meta.url), "utf8");
+	assert.doesNotMatch(source, /createBashTool\(process\.cwd\(\)\)/);
+	assert.match(source, /const bash = createBashTool\(ctx\.cwd\)/);
 });
