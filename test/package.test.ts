@@ -20,6 +20,7 @@ test("declares one umbrella Pi package and only the extension resource tree", ()
 		"bash-readable/index.ts",
 		"export-md/index.ts",
 		"no-italic/index.ts",
+		"reply-anchor/index.ts",
 	];
 	const discoveredEntrypoints: string[] = [];
 	for (const extensionName of readdirSync(join(root, "extensions"))) {
