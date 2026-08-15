@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import http from "node:http";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
+const packageRootPattern = root.replaceAll("\\", "/").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const PI_BIN = process.env.PI_BIN;
 if (!PI_BIN) {
 	throw new Error("Package smoke tests require an explicit Pi CLI path. Set PI_BIN to a trusted local Pi executable.");
@@ -264,7 +265,7 @@ export default function (pi: ExtensionAPI) {
 	const packageCommands = commands.filter((command) => command.name === "autotitle" || command.name === "export-md");
 	assert.deepEqual(packageCommands.map((command) => command.name).sort(), ["autotitle", "export-md"]);
 	for (const command of packageCommands) {
-		assert.match(command.sourceInfo.path.replaceAll("\\", "/"), /\/pimono\/extensions\/[^/]+\/index\.ts$/);
+		assert.match(command.sourceInfo.path.replaceAll("\\", "/"), new RegExp(`${packageRootPattern}/extensions/[^/]+/index\\.ts$`));
 		assert.equal(command.sourceInfo.origin, "package");
 	}
 	assert.equal(commands.filter((command) => command.name === "autotitle").length, 1);
@@ -279,7 +280,7 @@ export default function (pi: ExtensionAPI) {
 	assert.ok(bashToolProbe, `bash-readable did not register a bash tool: ${JSON.stringify(rpc.lines)}`);
 	const bashTools = JSON.parse(bashToolProbe.message);
 	assert.equal(bashTools.length, 1);
-	assert.match(bashTools[0].path.replaceAll("\\", "/"), /\/pimono\/extensions\/bash-readable\/index\.ts$/);
+	assert.match(bashTools[0].path.replaceAll("\\", "/"), new RegExp(`${packageRootPattern}/extensions/bash-readable/index\\.ts$`));
 
 	return { agentDir, projectDir };
 }
