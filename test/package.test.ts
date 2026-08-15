@@ -18,6 +18,7 @@ test("declares one umbrella Pi package and only the extension resource tree", ()
 	const expectedEntrypoints = [
 		"auto-title/index.ts",
 		"bash-readable/index.ts",
+		"delegate/index.ts",
 		"export-md/index.ts",
 		"no-italic/index.ts",
 		"reply-anchor/index.ts",

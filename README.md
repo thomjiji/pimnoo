@@ -8,11 +8,16 @@
 | --- | --- | --- |
 | `auto-title` | `extensions/auto-title/index.ts` | 为没有手动名称的 session 生成英文短标题 |
 | `bash-readable` | `extensions/bash-readable/index.ts` | 只改变 Bash 工具的显示格式，不改变执行行为 |
+| `delegate` | `extensions/delegate/index.ts` | 在独立 Git worktree 中启动 headless Pi RPC worker |
 | `export-md` | `extensions/export-md/index.ts` | 通过 `/export-md` 导出只包含提示和回复的 Markdown |
 | `no-italic` | `extensions/no-italic/index.ts` | 禁用 TUI 的 italic 显示样式 |
 | `reply-anchor` | `extensions/reply-anchor/index.ts` | 在 agent 回复开头添加可搜索的 `§` 锚点 |
 
 `bash-readable/format.ts` 是 package 内部 helper，不是 Pi extension。根目录的 `package.json` 通过 `pi.extensions` 声明 `./extensions`，Pi 的 package 目录发现规则只加载每个子目录的 `index.ts`，因此 helper 和测试不会被当成 extension 加载。
+
+## Delegate worker
+
+主 Pi 通过 `delegate` tool 的 `action: "start"` 一次启动一个或多个 worker；每个 task 至少提供一个明确的 `prompt`，也可以提供 `name`、`role`、`model` 和 `thinkingLevel`。worker 使用独立的 Git worktree 和持久 RPC session，完成后不会自动合并、提交或删除 worktree。
 
 ## 安全和信任
 
@@ -135,4 +140,4 @@ npm run test:smoke
 
 ## 目录和发布范围
 
-根 `package.json` 是 umbrella package 的唯一 manifest。`extensions/` 只包含五个运行时 extension 和 `bash-readable` 的内部 helper；`test/`、`scripts/` 和文档不在 `pi.extensions` 的资源范围内。初始版本不发布 npm、不添加第三方 runtime dependency、不创建 sibling package，也不提供会安装其他 package 的 `/setup` 命令。
+根 `package.json` 是 umbrella package 的唯一 manifest。`extensions/` 只包含六个运行时 extension 和 `bash-readable` 的内部 helper；`test/`、`scripts/` 和文档不在 `pi.extensions` 的资源范围内。初始版本不发布 npm、不添加第三方 runtime dependency、不创建 sibling package，也不提供会安装其他 package 的 `/setup` 命令。
