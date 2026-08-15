@@ -134,10 +134,14 @@ export const cleanTitle = (raw: string): string | undefined => {
 	// Strip trailing punctuation.
 	t = t.replace(/[.\u3002!\uFF01?\uFF1F:\uFF1A;\uFF1B,\uFF0C\s]+$/, "");
 
-	// Collapse internal whitespace and enforce sentence case: capitalize only
-	// the first character, with all following characters in lowercase.
+	// Collapse internal whitespace and enforce sentence case: capitalize the
+	// first character. Preserve the model's casing so proper nouns like
+	// "ChatGPT" survive; only normalize to lowercase when the model shouted
+	// (all caps, no lowercase letters at all).
 	t = t.replace(/\s+/g, " ").trim();
-	t = t.toLowerCase();
+	if (/[A-Z]/.test(t) && !/[a-z]/.test(t)) {
+		t = t.toLowerCase();
+	}
 	if (t.length > 0) {
 		t = t.charAt(0).toUpperCase() + t.slice(1);
 	}

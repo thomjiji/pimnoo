@@ -18,6 +18,12 @@ test("normalizes generated titles to sentence case and a bounded length", () => 
 	assert.equal(cleanTitle("A".repeat(80))?.length, 40);
 });
 
+test("preserves proper nouns when the model already uses sentence case", () => {
+	assert.equal(cleanTitle("Using ChatGPT for a quick fix"), "Using ChatGPT for a quick fix");
+	assert.equal(cleanTitle("Set up TypeScript in VS Code"), "Set up TypeScript in VS Code");
+	assert.equal(cleanTitle("CHATGPT VS CLAUDE"), "Chatgpt vs claude");
+});
+
 test("keeps the first and latest user goals while bounding conversation context", () => {
 	const sample = buildConversationSample([
 		{ role: "user", text: "First goal" },
