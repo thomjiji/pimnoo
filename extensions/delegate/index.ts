@@ -1,10 +1,8 @@
 import { Type } from "typebox";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
-import { applyTaskLimits, isDelegateWorkerProcess, TERMINAL_WORKER_STATUSES, WorkerSupervisor } from "./supervisor.ts";
+import { applyTaskLimits, isDelegateWorkerProcess, WorkerSupervisor } from "./supervisor.ts";
 import { FleetList } from "./fleet-list.ts";
-import { formatLogsText, formatProgressText, formatReportText, formatStartText, formatStatusText, formatStopText, workerReportText } from "./format.ts";
-import type { WorkerReportEntry } from "./format.ts";
+import { formatLogsText, formatProgressText, formatReportText, formatStartText, formatStatusText, formatStopText } from "./format.ts";
 import type { WorkerTaskState } from "./supervisor.ts";
 
 const workerTaskSchema = Type.Object({
