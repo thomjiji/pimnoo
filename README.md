@@ -17,7 +17,15 @@
 
 ## Delegate worker
 
-主 Pi 通过 `delegate` tool 的 `action: "start"` 一次启动一个或多个 worker；每个 task 至少提供一个明确的 `prompt`，也可以提供 `name`、`role`、`model` 和 `thinkingLevel`。worker 使用独立的 Git worktree 和持久 RPC session，完成后不会自动合并、提交或删除 worktree。
+主 Pi 通过 `delegate` tool 管理无界面 worker：`action: "start"` 一次启动一个或多个 worker，每个 task 至少提供一个明确的 `prompt`，也可以提供 `name`、`role`、`model` 和 `thinkingLevel`；启动之后可以按 task ID 继续控制它们。
+
+- `steer`：向正在运行的 worker 发送 steering message，在下一个模型调用前到达；worker 空闲时应使用 `follow_up`。
+- `follow_up`：发送等到当前 agent run settle 后才执行的消息，支持同一 worker 的多轮任务。
+- `status`：查询单个 worker（`taskId`）或全部 worker 的状态。
+- `wait`：等待一个或一组 worker（`taskIds`，默认全部）到达终态并取回与 task ID 关联的最终报告；父会话按 Escape 取消等待。
+- `stop`：中止并终止指定 worker，保留其 session 和 worktree 供检查。
+
+每个 worker 使用独立的 Git worktree 和持久 RPC session，完成后不会自动合并、提交或删除 worktree。状态机区分 `starting`、`running`、`waiting`、`completed`、`failed`、`aborted` 和 `stopped`；主 TUI 的状态栏会以单行汇总显示各 worker 数量。
 
 ## 安全和信任
 

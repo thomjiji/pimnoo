@@ -1,18 +1,39 @@
 import { randomUUID } from "node:crypto";
 import { execFile, spawn } from "node:child_process";
-import { mkdir } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
+import { JsonlRpcClient, RpcWorkerError } from "./rpc-client.ts";
+import type { WorkerProcessLike } from "./rpc-client.ts";
 
 const execFileAsync = promisify(execFile);
 
 export const WORKER_ENVIRONMENT_MARKER = "PIMONO_DELEGATE_WORKER";
 
+export { RpcWorkerError } from "./rpc-client.ts";
+
 export function isDelegateWorkerProcess(environment: Record<string, string | undefined> = process.env): boolean {
 	return environment[WORKER_ENVIRONMENT_MARKER] === "1";
 }
 
-export type WorkerStatus = "starting" | "running" | "exited" | "failed";
+/**
+ * Worker lifecycle states.
+ *
+ * - starting: process spawned, startup handshake in progress.
+ * - running: an agent run is active.
+ * - waiting: agent settled but steering or follow-up messages are still queued.
+ * - completed: agent settled with no queued messages; the final report is available.
+ * - failed: the worker died or its RPC stream became unusable.
+ * - aborted: the active agent run was aborted; the worker is still alive.
+ * - stopped: the parent terminated the worker process.
+ *
+ * `completed`, `failed`, `aborted`, and `stopped` are terminal for `waitForTerminal`.
+ */
+export type WorkerStatus = "starting" | "running" | "waiting" | "completed" | "failed" | "aborted" | "stopped";
+
+export const TERMINAL_WORKER_STATUSES: readonly WorkerStatus[] = ["completed", "failed", "aborted", "stopped"];
+
+const STICKY_STATUSES: readonly WorkerStatus[] = ["failed", "stopped"];
 
 export interface WorkerTaskDefinition {
 	prompt: string;
@@ -43,9 +64,15 @@ export interface WorkerStartResult {
 }
 
 export interface WorkerTaskState extends WorkerStartResult {
+	turns: number;
+	pendingSteering: number;
+	pendingFollowUps: number;
+	lastTool?: string;
+	finalText?: string;
+	error?: string;
+	diagnostics?: string;
 	exitCode?: number | null;
 	exitSignal?: string | null;
-	error?: string;
 }
 
 export interface GitResult {
@@ -63,50 +90,14 @@ export interface PiCommand {
 	args?: string[];
 }
 
-interface WritableStreamLike {
-	write(data: string): boolean;
-	end(): void;
-}
-
-interface ReadableStreamLike {
-	on(event: "data", handler: (chunk: string | Uint8Array) => void): unknown;
-	on(event: "error", handler: (error: Error) => void): unknown;
-}
-
-interface WorkerProcessLike {
-	stdin?: WritableStreamLike;
-	stdout?: ReadableStreamLike;
-	stderr?: ReadableStreamLike;
-	on(event: "error", handler: (error: Error) => void): unknown;
-	on(event: "exit", handler: (code: number | null, signal: string | null) => void): unknown;
-	kill(signal?: string): boolean;
-}
-
 export interface WorkerSupervisorOptions {
 	git?: GitRunner;
 	spawnWorker?: (command: string, args: string[], options: Record<string, unknown>) => WorkerProcessLike;
 	piCommand?: PiCommand;
 	worktreeRoot?: string;
 	environment?: Record<string, string>;
-}
-
-interface RpcResponse {
-	id?: string;
-	type: "response";
-	command: string;
-	success: boolean;
-	data?: Record<string, unknown>;
-	error?: string;
-}
-
-interface RpcCommand {
-	type: string;
-	[key: string]: unknown;
-}
-
-interface PendingRequest {
-	resolve: (response: RpcResponse) => void;
-	reject: (error: Error) => void;
+	/** Called after any worker state transition, for example to refresh TUI status surfaces. */
+	onStateChange?: () => void;
 }
 
 interface PreparedWorktree {
@@ -120,6 +111,15 @@ interface WorkerHandle {
 	state: WorkerTaskState;
 	process: WorkerProcessLike;
 	rpc: JsonlRpcClient;
+	/** True between agent_settled and the supervisor's settle reconciliation. */
+	settling: boolean;
+	/** True when the settled run ended with an aborted stop reason. */
+	runAborted: boolean;
+}
+
+interface Waiter {
+	taskIds: Set<string>;
+	resolve: (states: WorkerTaskState[]) => void;
 }
 
 export class WorkerSupervisorError extends Error {
@@ -141,13 +141,6 @@ export class GitCommandError extends WorkerSupervisorError {
 	}
 }
 
-export class RpcWorkerError extends WorkerSupervisorError {
-	constructor(message: string) {
-		super(message);
-		this.name = "RpcWorkerError";
-	}
-}
-
 export class DefaultGitRunner implements GitRunner {
 	async run(args: string[], cwd: string): Promise<GitResult> {
 		try {
@@ -164,94 +157,15 @@ export class DefaultGitRunner implements GitRunner {
 	}
 }
 
-class JsonlRpcClient {
-	private readonly pending = new Map<string, PendingRequest>();
-	private readonly eventHandlers: Array<(event: Record<string, unknown>) => void> = [];
-	private nextRequestId = 0;
-	private inputBuffer = "";
-	private closed = false;
-
-	private readonly process: WorkerProcessLike;
-
-	constructor(process: WorkerProcessLike) {
-		this.process = process;
-		if (!process.stdin || !process.stdout) throw new RpcWorkerError("RPC worker did not expose stdin/stdout");
-		process.stdout.on("data", (chunk) => this.receive(chunk));
-		process.stdout.on("error", (error) => this.fail(error));
-		process.on("error", (error) => this.fail(error));
-		process.on("exit", (code, signal) => {
-			this.fail(new RpcWorkerError(`RPC worker exited before responding (code=${code}, signal=${signal})`));
-		});
-	}
-
-	onEvent(handler: (event: Record<string, unknown>) => void): void {
-		this.eventHandlers.push(handler);
-	}
-
-	request(command: RpcCommand): Promise<RpcResponse> {
-		if (this.closed) return Promise.reject(new RpcWorkerError("RPC worker is closed"));
-		const id = `delegate-${++this.nextRequestId}`;
-		const request = { ...command, id };
-		return new Promise((resolve, reject) => {
-			this.pending.set(id, { resolve, reject });
-			try {
-				this.process.stdin!.write(`${JSON.stringify(request)}\n`);
-			} catch (error) {
-				this.pending.delete(id);
-				reject(error instanceof Error ? error : new Error(String(error)));
-			}
-		});
-	}
-
-	close(): void {
-		this.closed = true;
-		this.fail(new RpcWorkerError("RPC worker closed"));
-	}
-
-	private receive(chunk: string | Uint8Array): void {
-		this.inputBuffer += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
-		while (true) {
-			const newline = this.inputBuffer.indexOf("\n");
-			if (newline < 0) return;
-			const line = this.inputBuffer.slice(0, newline).replace(/\r$/, "");
-			this.inputBuffer = this.inputBuffer.slice(newline + 1);
-			if (!line) continue;
-			let event: Record<string, unknown>;
-			try {
-				event = JSON.parse(line) as Record<string, unknown>;
-			} catch {
-				this.eventHandlers.forEach((handler) => handler({ type: "malformed", line }));
-				continue;
-			}
-			if (event.type === "response" && typeof event.id === "string") {
-				const pending = this.pending.get(event.id);
-				if (pending) {
-					this.pending.delete(event.id);
-					const response = event as unknown as RpcResponse;
-					if (response.success) pending.resolve(response);
-					else pending.reject(new RpcWorkerError(response.error ?? `RPC ${response.command} failed`));
-					continue;
-				}
-			}
-			this.eventHandlers.forEach((handler) => handler(event));
-		}
-	}
-
-	private fail(error: Error): void {
-		if (this.closed && this.pending.size === 0) return;
-		this.closed = true;
-		for (const pending of this.pending.values()) pending.reject(error);
-		this.pending.clear();
-	}
-}
-
 export class WorkerSupervisor {
 	private readonly git: GitRunner;
 	private readonly spawnWorker: NonNullable<WorkerSupervisorOptions["spawnWorker"]>;
 	private readonly piCommand: PiCommand;
 	private readonly worktreeRoot?: string;
 	private readonly environment: Record<string, string>;
+	private readonly onStateChange?: () => void;
 	private readonly workers = new Map<string, WorkerHandle>();
+	private readonly waiters = new Set<Waiter>();
 
 	constructor(options: WorkerSupervisorOptions = {}) {
 		this.git = options.git ?? new DefaultGitRunner();
@@ -259,6 +173,7 @@ export class WorkerSupervisor {
 		this.piCommand = options.piCommand ?? detectPiCommand();
 		this.worktreeRoot = options.worktreeRoot;
 		this.environment = options.environment ?? {};
+		this.onStateChange = options.onStateChange;
 	}
 
 	async start(request: StartWorkersRequest): Promise<WorkerStartResult[]> {
@@ -274,20 +189,133 @@ export class WorkerSupervisor {
 			}
 			return started.map((worker) => ({ ...worker.state }));
 		} catch (error) {
-			for (const worker of started) await this.stopWorker(worker);
+			for (const worker of started) {
+				this.transition(worker, "stopped");
+				await this.terminateWorker(worker);
+			}
 			await this.rollbackWorktrees(repository.root, prepared);
+			for (const worker of started) await this.removeSessionFile(worker);
 			throw error;
 		}
 	}
 
+	/** Send a steering message that arrives before the worker's next model call. */
+	async steer(taskId: string, message: string): Promise<WorkerTaskState> {
+		const worker = this.requireWorker(taskId);
+		if (typeof message !== "string" || !message.trim()) throw new WorkerSupervisorError("A steering message is required.");
+		if (worker.state.status !== "running") {
+			throw new WorkerSupervisorError(`Worker ${taskId} is ${worker.state.status}, not running; use follow_up for a settled worker.`);
+		}
+		await worker.rpc.request({ type: "steer", message });
+		return this.snapshot(worker);
+	}
+
+	/** Send a follow-up message that waits until the current agent run settles. */
+	async followUp(taskId: string, message: string): Promise<WorkerTaskState> {
+		const worker = this.requireWorker(taskId);
+		if (typeof message !== "string" || !message.trim()) throw new WorkerSupervisorError("A follow-up message is required.");
+		if (worker.state.status === "starting" || STICKY_STATUSES.includes(worker.state.status) || worker.state.status === "aborted") {
+			throw new WorkerSupervisorError(`Worker ${taskId} is ${worker.state.status} and cannot accept follow-up messages.`);
+		}
+		await worker.rpc.request({ type: "follow_up", message });
+		return this.snapshot(worker);
+	}
+
+	/** Query one worker by task ID, or all workers when no ID is given. */
+	status(taskId?: string): WorkerTaskState[] {
+		if (taskId) return [this.snapshot(this.requireWorker(taskId))];
+		return this.list();
+	}
+
+	/**
+	 * Wait until the given workers (all of them by default) reach a terminal
+	 * status, then return their final states. Resolves early with the current
+	 * states when the parent aborts the wait via `signal`.
+	 */
+	waitForTerminal(taskIds?: string[], signal?: AbortSignal): Promise<WorkerTaskState[]> {
+		const target = taskIds ? new Set(taskIds) : new Set(this.workers.keys());
+		for (const id of target) {
+			if (!this.workers.has(id)) throw new WorkerSupervisorError(`No worker with task ID ${id}`);
+		}
+		const snapshot = (): WorkerTaskState[] =>
+			[...this.workers.values()].filter((worker) => target.has(worker.state.taskId)).map((worker) => this.snapshot(worker));
+		if (target.size === 0) return Promise.resolve([]);
+		if (signal?.aborted) return Promise.resolve(snapshot());
+		if (snapshot().every((state) => TERMINAL_WORKER_STATUSES.includes(state.status))) return Promise.resolve(snapshot());
+		return new Promise((resolve) => {
+			const waiter: Waiter = { taskIds: target, resolve: () => {} };
+			const finish = (states: WorkerTaskState[]): void => {
+				this.waiters.delete(waiter);
+				signal?.removeEventListener("abort", onAbort);
+				resolve(states);
+			};
+			const onAbort = (): void => finish(snapshot());
+			waiter.resolve = finish;
+			this.waiters.add(waiter);
+			signal?.addEventListener("abort", onAbort, { once: true });
+		});
+	}
+
+	/**
+	 * Stop one worker: abort its active run when one exists, then terminate
+	 * the process. The worker's session file and worktree are preserved.
+	 */
+	async stop(taskId: string): Promise<WorkerTaskState> {
+		const worker = this.requireWorker(taskId);
+		if (!STICKY_STATUSES.includes(worker.state.status) && worker.state.status !== "stopped") {
+			if (worker.state.status === "starting" || worker.state.status === "running" || worker.state.status === "waiting" || worker.state.status === "aborted") {
+				try {
+					await worker.rpc.request({ type: "abort" });
+				} catch {
+					// The worker may already be gone; termination below still applies.
+				}
+				// Bounded grace so the aborted run can settle and be recorded in the session.
+				await waitForStatus(worker, ["aborted", "completed", "waiting", "failed"], 300);
+			}
+			this.transition(worker, "stopped");
+			await this.terminateWorker(worker);
+		}
+		return this.snapshot(worker);
+	}
+
 	list(): WorkerTaskState[] {
-		return [...this.workers.values()].map((worker) => ({ ...worker.state }));
+		return [...this.workers.values()].map((worker) => this.snapshot(worker));
 	}
 
 	async dispose(): Promise<void> {
 		const workers = [...this.workers.values()];
+		for (const worker of workers) this.transition(worker, "stopped");
 		this.workers.clear();
-		await Promise.all(workers.map((worker) => this.stopWorker(worker)));
+		await Promise.all(workers.map(async (worker) => {
+			await this.terminateWorker(worker);
+		}));
+	}
+
+	private snapshot(worker: WorkerHandle): WorkerTaskState {
+		return { ...worker.state };
+	}
+
+	private requireWorker(taskId: string): WorkerHandle {
+		const worker = this.workers.get(taskId);
+		if (!worker) throw new WorkerSupervisorError(`No worker with task ID ${taskId}`);
+		return worker;
+	}
+
+	private transition(worker: WorkerHandle, status: WorkerStatus): void {
+		if (worker.state.status === status) return;
+		if (STICKY_STATUSES.includes(worker.state.status)) return;
+		worker.state.status = status;
+		this.onStateChange?.();
+		this.resolveWaiters();
+	}
+
+	private resolveWaiters(): void {
+		for (const waiter of [...this.waiters]) {
+			const states = [...this.workers.values()]
+				.filter((worker) => waiter.taskIds.has(worker.state.taskId))
+				.map((worker) => this.snapshot(worker));
+			if (states.every((state) => TERMINAL_WORKER_STATUSES.includes(state.status))) waiter.resolve(states);
+		}
 	}
 
 	private async prepareRepository(repositoryCwd: string): Promise<{ root: string; revision: string }> {
@@ -357,25 +385,12 @@ export class WorkerSupervisor {
 			sessionFile: "",
 			sessionName,
 			status: "starting",
+			turns: 0,
+			pendingSteering: 0,
+			pendingFollowUps: 0,
 		};
-		const handle: WorkerHandle = { state, process: child, rpc };
-		child.on("exit", (code, signal) => {
-			state.exitCode = code;
-			state.exitSignal = signal;
-			if (state.status === "starting" || state.status === "running") state.status = code === 0 ? "exited" : "failed";
-		});
-		child.on("error", (error) => {
-			state.status = "failed";
-			state.error = error.message;
-		});
-		rpc.onEvent((event) => {
-			if (event.type === "malformed") state.error = `Malformed RPC output: ${String(event.line)}`;
-		});
-		child.stderr?.on("data", (chunk) => {
-			const text = typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
-			state.error = text.trim() || state.error;
-		});
-
+		const handle: WorkerHandle = { state, process: child, rpc, settling: false, runAborted: false };
+		this.wireWorkerEvents(handle);
 		try {
 			const newSession = await rpc.request({ type: "new_session", ...(request.parentSession ? { parentSession: request.parentSession } : {}) });
 			if (newSession.data?.cancelled === true) throw new RpcWorkerError("RPC worker refused to create its delegated session");
@@ -386,19 +401,109 @@ export class WorkerSupervisor {
 			state.sessionFile = sessionFile;
 			await rpc.request({ type: "prompt", message: buildTaskPrompt(prepared.task) });
 			if (state.exitCode !== undefined) throw new RpcWorkerError("RPC worker exited before startup completed");
-			state.status = "running";
+			this.transition(handle, "running");
 			return handle;
 		} catch (error) {
-			state.status = "failed";
-			state.error = error instanceof Error ? error.message : String(error);
-			await this.stopWorker(handle);
+			this.transition(handle, "failed");
+			await this.terminateWorker(handle);
+			await this.removeSessionFile(handle);
 			throw error;
 		}
 	}
 
-	private async stopWorker(worker: WorkerHandle): Promise<void> {
+	private wireWorkerEvents(worker: WorkerHandle): void {
+		const { state, process, rpc } = worker;
+		process.on("exit", (code, signal) => {
+			state.exitCode = code;
+			state.exitSignal = signal;
+			if (state.status === "starting") return; // The startup path decides the outcome.
+			if (state.status === "running" || state.status === "waiting" || state.status === "completed" || state.status === "aborted") {
+				this.transition(worker, code === 0 ? "completed" : "failed");
+				if (code !== 0) state.error = `RPC worker exited with code ${code}`;
+			}
+		});
+		process.on("error", (error) => {
+			state.error = error.message;
+			this.transition(worker, "failed");
+		});
+		process.stderr?.on("data", (chunk) => {
+			const text = typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
+			state.diagnostics = `${state.diagnostics ?? ""}${text}`.slice(-2000);
+		});
+		rpc.onEvent((event) => {
+			switch (event.type) {
+				case "malformed":
+					state.error = `Malformed RPC output: ${String(event.line)}`;
+					this.transition(worker, "failed");
+					break;
+				case "agent_start":
+					worker.settling = false;
+					worker.runAborted = false;
+					this.transition(worker, "running");
+					break;
+				case "turn_start":
+					state.turns += 1;
+					this.transition(worker, "running");
+					break;
+				case "tool_execution_start":
+					state.lastTool = typeof event.toolName === "string" ? event.toolName : undefined;
+					this.transition(worker, "running");
+					break;
+				case "tool_execution_end":
+					state.lastTool = undefined;
+					break;
+				case "queue_update": {
+					state.pendingSteering = countMessages(event.steering);
+					state.pendingFollowUps = countMessages(event.followUp);
+					// Only the authoritative settle reconciliation may mark a worker
+					// completed; draining the queue here would race follow-up delivery.
+					if (!isActive(state.status) && state.pendingSteering + state.pendingFollowUps > 0) {
+						this.transition(worker, "waiting");
+					}
+					break;
+				}
+				case "message_end": {
+					const message = event.message as { role?: string; content?: unknown; stopReason?: string } | undefined;
+					if (message?.role === "assistant") {
+						const text = assistantText(message.content);
+						if (text) state.finalText = text;
+						if (message.stopReason === "aborted") worker.runAborted = true;
+					}
+					break;
+				}
+				case "agent_settled":
+					worker.settling = true;
+					void this.reconcileSettle(worker);
+					break;
+				default:
+					break;
+			}
+		});
+	}
+
+	/** After a settle, sync authoritative state from the worker: queued messages and final text. */
+	private async reconcileSettle(worker: WorkerHandle): Promise<void> {
+		try {
+			const [stateResponse, textResponse] = await Promise.all([
+				worker.rpc.request({ type: "get_state" }),
+				worker.rpc.request({ type: "get_last_assistant_text" }),
+			]);
+			if (!worker.settling) return; // A new run started while we were querying.
+			worker.settling = false;
+			const data = stateResponse.data ?? {};
+			const pending = Number(data.pendingMessageCount ?? 0) || 0;
+			const text = typeof textResponse.data?.text === "string" ? textResponse.data.text : "";
+			if (text) worker.state.finalText = text;
+			if (worker.runAborted) this.transition(worker, "aborted");
+			else if (pending > 0) this.transition(worker, "waiting");
+			else this.transition(worker, "completed");
+		} catch {
+			// The worker died mid-query; the exit handler records the terminal state.
+		}
+	}
+
+	private async terminateWorker(worker: WorkerHandle): Promise<void> {
 		worker.rpc.close();
-		if (worker.state.status === "starting" || worker.state.status === "running") worker.state.status = "exited";
 		try {
 			worker.process.stdin?.end();
 		} catch {
@@ -411,12 +516,40 @@ export class WorkerSupervisor {
 		}
 	}
 
+	private async removeSessionFile(worker: WorkerHandle): Promise<void> {
+		if (!worker.state.sessionFile) return;
+		try {
+			await rm(worker.state.sessionFile, { force: true });
+		} catch {
+			// Best effort; the rollback should not fail because of a session file.
+		}
+	}
+
 	private async rollbackWorktrees(repositoryRoot: string, prepared: PreparedWorktree[]): Promise<void> {
 		for (const worktree of [...prepared].reverse()) {
 			await this.git.run(["worktree", "remove", "--force", worktree.worktree], repositoryRoot);
 			await this.git.run(["branch", "-D", worktree.branch], repositoryRoot);
 		}
 	}
+}
+
+function isActive(status: WorkerStatus): boolean {
+	return status === "starting" || status === "running";
+}
+
+function countMessages(value: unknown): number {
+	return Array.isArray(value) ? value.length : 0;
+}
+
+function assistantText(content: unknown): string | undefined {
+	if (!Array.isArray(content)) return undefined;
+	const parts: string[] = [];
+	for (const block of content) {
+		if (typeof block === "object" && block !== null && (block as { type?: string }).type === "text" && typeof (block as { text?: unknown }).text === "string") {
+			parts.push((block as { text: string }).text);
+		}
+	}
+	return parts.length > 0 ? parts.join("") : undefined;
 }
 
 function validateStartRequest(request: StartWorkersRequest): void {
@@ -455,4 +588,21 @@ function buildTaskPrompt(task: WorkerTaskDefinition): string {
 	if (task.role?.trim()) sections.push(`Role: ${normalizeSessionName(task.role)}`);
 	sections.push(`Task prompt:\n${task.prompt}`);
 	return sections.join("\n\n");
+}
+
+async function waitForStatus(worker: WorkerHandle, statuses: WorkerStatus[], timeoutMs: number): Promise<void> {
+	if (statuses.includes(worker.state.status)) return;
+	await new Promise<void>((resolvePromise) => {
+		const timer = setInterval(() => {
+			if (statuses.includes(worker.state.status)) {
+				clearInterval(timer);
+				clearTimeout(deadline);
+				resolvePromise();
+			}
+		}, 10);
+		const deadline = setTimeout(() => {
+			clearInterval(timer);
+			resolvePromise();
+		}, timeoutMs);
+	});
 }

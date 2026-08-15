@@ -8,27 +8,148 @@ const sessionDir = sessionDirIndex >= 0 ? args[sessionDirIndex + 1] : process.cw
 let sessionFile;
 let sessionName;
 let buffer = "";
+let inRun = false;
+let lastFinalText = null;
+let steeringQueue = [];
+let followUpQueue = [];
+let releaseKind = null;
+let steeredText = null;
+let steerRun = null;
+let abortRun = null;
+let messageCount = 0;
 
 function log(entry) {
-	if (logPath) appendFileSync(logPath, `${JSON.stringify(entry)}\n`);
+	if (logPath) appendFileSync(logPath, `${JSON.stringify({ pid: process.pid, ...entry })}\n`);
+}
+
+function emit(type, extra = {}) {
+	process.stdout.write(`${JSON.stringify({ type, ...extra })}\n`);
 }
 
 function respond(command, data) {
-	process.stdout.write(`${JSON.stringify({ id: command.id, type: "response", command: command.type, success: true, ...(data === undefined ? {} : { data }) })}\n`);
+	process.stdout.write(
+		`${JSON.stringify({
+			id: command.id,
+			type: "response",
+			command: command.type,
+			success: true,
+			...(data === undefined ? {} : { data }),
+		})}\n`,
+	);
 }
 
 function appendSession(entry) {
 	if (sessionFile) appendFileSync(sessionFile, `${JSON.stringify(entry)}\n`);
 }
 
-log({
-	kind: "start",
-	args,
-	cwd: process.cwd(),
-	workerMarker: process.env.PIMONO_DELEGATE_WORKER,
-});
+/**
+ * Behavior directives parsed from task prompts and follow-up messages.
+ * Each directive is a line of the form `@fake:name [value]`:
+ * - `@fake:settle <text>`  final report text for this run (default "fake final report")
+ * - `@fake:delay <ms>`     wait before settling
+ * - `@fake:hold`           keep the run active until a steer or abort arrives
+ * - `@fake:abort`          end the run with an aborted stop reason
+ * - `@fake:malformed`      emit one malformed JSON line at run start
+ * - `@fake:stderr <text>`  write text to stderr at run start
+ * - `@fake:exit <code>`    exit the process after the run settles
+ * - `@fake:exit-startup <code>`  exit before responding to the prompt command
+ */
+function parseDirectives(message) {
+	const directives = { settleText: null, delayMs: 0, hold: false, abort: false, malformed: false, stderr: null, exitCode: undefined, exitStartupCode: undefined };
+	for (const line of String(message).split("\n")) {
+		const match = line.match(/^@fake:(\S+)(?:\s+(.*))?$/);
+		if (!match) continue;
+		const value = match[2] ?? null;
+		switch (match[1]) {
+			case "settle":
+				directives.settleText = value;
+				break;
+			case "delay":
+				directives.delayMs = Number(value) || 0;
+				break;
+			case "hold":
+				directives.hold = true;
+				break;
+			case "abort":
+				directives.abort = true;
+				break;
+			case "malformed":
+				directives.malformed = true;
+				break;
+			case "stderr":
+				directives.stderr = value;
+				break;
+			case "exit":
+				directives.exitCode = Number(value) || 0;
+				break;
+			case "exit-startup":
+				directives.exitStartupCode = Number(value) || 0;
+				break;
+			default:
+				break;
+		}
+	}
+	return directives;
+}
 
-process.stdin.setEncoding("utf8");
+function sleep(ms) {
+	return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
+}
+
+async function runCycle(message) {
+	const directives = parseDirectives(message);
+	if (directives.malformed) process.stdout.write('{"type": "malformed", broken\n');
+	if (directives.stderr !== null) process.stderr.write(`${directives.stderr}\n`);
+	inRun = true;
+	emit("agent_start");
+	emit("turn_start");
+	emit("queue_update", { steering: steeringQueue, followUp: followUpQueue });
+	const waitMs = directives.hold ? 60_000 : directives.delayMs;
+	if (waitMs > 0) {
+		await new Promise((resolvePromise) => {
+			const timer = setTimeout(resolvePromise, waitMs);
+			abortRun = () => {
+				clearTimeout(timer);
+				resolvePromise();
+			};
+			if (directives.hold) steerRun = abortRun; // Only a held run accepts steering.
+		});
+		abortRun = null;
+		steerRun = null;
+	}
+	inRun = false;
+	const aborted = directives.abort || releaseKind === "abort";
+	const steered = releaseKind === "steer";
+	const text = aborted ? "" : steered ? steeredText : directives.settleText ?? "fake final report";
+	releaseKind = null;
+	steeredText = null;
+	if (!aborted) lastFinalText = text;
+	emit("message_end", { message: { role: "assistant", content: [{ type: "text", text }], stopReason: aborted ? "aborted" : "stop" } });
+	emit("turn_end", { message: { role: "assistant" }, toolResults: [] });
+	emit("agent_settled");
+	if (steered) {
+		steeringQueue.shift();
+		emit("queue_update", { steering: steeringQueue, followUp: followUpQueue });
+	}
+	if (directives.exitCode !== undefined) {
+		process.exit(directives.exitCode);
+		return;
+	}
+	if (followUpQueue.length > 0) {
+		const next = followUpQueue.shift();
+		emit("queue_update", { steering: steeringQueue, followUp: followUpQueue });
+		await runCycle(next);
+	}
+}
+
+	log({
+		kind: "start",
+		args,
+		cwd: process.cwd(),
+		workerMarker: process.env.PIMONO_DELEGATE_WORKER,
+	});
+
+	process.stdin.setEncoding("utf8");
 process.stdin.on("data", (chunk) => {
 	buffer += chunk;
 	while (true) {
@@ -66,19 +187,56 @@ process.stdin.on("data", (chunk) => {
 					sessionId: `fake-${process.pid}`,
 					sessionFile,
 					sessionName,
-					isStreaming: false,
+					isStreaming: inRun,
 					isCompacting: false,
 					steeringMode: "all",
 					followUpMode: "one-at-a-time",
 					autoCompactionEnabled: true,
-					messageCount: 0,
-					pendingMessageCount: 0,
+					messageCount,
+					pendingMessageCount: steeringQueue.length + followUpQueue.length,
 					thinkingLevel: "medium",
 				});
 				break;
-			case "prompt":
+			case "get_last_assistant_text":
+				respond(command, { text: lastFinalText });
+				break;
+			case "prompt": {
+				const directives = parseDirectives(command.message);
+				messageCount += 1;
+				if (directives.exitStartupCode !== undefined) {
+					process.exit(directives.exitStartupCode);
+					break;
+				}
 				respond(command);
-				process.stdout.write(`${JSON.stringify({ type: "turn_start", turn: 1 })}\n`);
+				void runCycle(command.message);
+				break;
+			}
+			case "steer":
+				respond(command);
+				steeringQueue.push(command.message);
+				emit("queue_update", { steering: steeringQueue, followUp: followUpQueue });
+				if (inRun && steerRun) {
+					releaseKind = "steer";
+					steeredText = command.message;
+					steerRun();
+				}
+				break;
+			case "follow_up":
+				respond(command);
+				followUpQueue.push(command.message);
+				emit("queue_update", { steering: steeringQueue, followUp: followUpQueue });
+				if (!inRun) {
+					followUpQueue.shift();
+					emit("queue_update", { steering: steeringQueue, followUp: followUpQueue });
+					void runCycle(command.message);
+				}
+				break;
+			case "abort":
+				respond(command);
+				if (inRun && abortRun) {
+					releaseKind = "abort";
+					abortRun();
+				}
 				break;
 			default:
 				respond(command);
