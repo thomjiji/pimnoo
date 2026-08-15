@@ -55,8 +55,6 @@ export function formatStopText(state: WorkerTaskState): string {
 	return `Stopped worker ${state.taskId} (${state.sessionName}): ${state.status}\n  worktree: ${state.worktree}\n  session: ${state.sessionFile}`;
 }
 
-const SUMMARY_ORDER: readonly WorkerStatus[] = ["starting", "running", "waiting", "wrapping up", "completed", "failed", "aborted", "stopped", "limit-reached", "timed-out"];
-
 function formatDuration(ms: number): string {
 	if (ms < 1000) return `${ms}ms`;
 	if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
@@ -85,45 +83,31 @@ export function formatLogsText(state: WorkerTaskState): string {
 	return `${header}\n${body || "  (no activity recorded)"}`;
 }
 
-const MAX_FLEET_ROWS = 6;
+const MAX_FLEET_ROWS = 5;
 
 /**
- * Render-only fleet list rows for the footer: one row per active worker
- * (earliest launched first) with a selection marker, plus the selected
- * worker's recent activity lines when expanded.
+ * Render-only fleet list lines for the footer: a header with the active
+ * count, one row per worker (active first, then recently finished), and
+ * a "↓ N more" indicator when the list is windowed.
  */
-export function fleetListLines(states: WorkerTaskState[], selectedIndex: number, expanded?: { taskId: string; lines: string[] }): string[] {
-	const active = states
-		.filter((state) => !TERMINAL_WORKER_STATUSES.includes(state.status))
-		.sort((a, b) => (b.elapsedMs ?? 0) - (a.elapsedMs ?? 0));
-	const lines: string[] = [];
-	active.slice(0, MAX_FLEET_ROWS).forEach((state, index) => {
+export function fleetListLines(states: WorkerTaskState[]): string[] {
+	const active = states.filter((state) => !TERMINAL_WORKER_STATUSES.includes(state.status));
+	const ordered = states
+		.filter((state) => !TERMINAL_WORKER_STATUSES.includes(state.status) || state.completedAt !== undefined)
+		.sort((a, b) => {
+			const aTerminal = TERMINAL_WORKER_STATUSES.includes(a.status) ? 1 : 0;
+			const bTerminal = TERMINAL_WORKER_STATUSES.includes(b.status) ? 1 : 0;
+			if (aTerminal !== bTerminal) return aTerminal - bTerminal;
+			return (b.elapsedMs ?? 0) - (a.elapsedMs ?? 0);
+		});
+	const lines = [`delegate: ${active.length} active worker${active.length === 1 ? "" : "s"}`];
+	ordered.slice(0, MAX_FLEET_ROWS).forEach((state) => {
 		const parts = [`${state.sessionName}: ${state.status}`];
 		if (state.turns > 0) parts.push(`turn ${state.turns}`);
 		if (state.status === "running" && state.lastTool) parts.push(`${state.lastTool} ${formatDuration(state.toolElapsedMs ?? 0)}`);
 		if (state.elapsedMs !== undefined) parts.push(formatDuration(state.elapsedMs));
-		lines.push(`${index === selectedIndex ? "●" : " "} ${parts.join(" · ")}`);
-		if (index === selectedIndex && expanded && expanded.taskId === state.taskId) {
-			for (const line of expanded.lines.slice(-5)) lines.push(`   ${line}`);
-		}
+		lines.push(`  ${parts.join(" · ")}`);
 	});
-	if (active.length > MAX_FLEET_ROWS) lines.push(`   ...and ${active.length - MAX_FLEET_ROWS} more`);
+	if (ordered.length > MAX_FLEET_ROWS) lines.push(`  ↓ ${ordered.length - MAX_FLEET_ROWS} more`);
 	return lines;
-}
-/**
- * One-line footer summary for active workers only. Returns undefined when
- * every worker is terminal or settled, so the caller clears the status entry
- * instead of leaving stale history in the status bar.
- */
-export function statusSummaryText(states: WorkerTaskState[]): string | undefined {
-	const active = states.filter((state) => !TERMINAL_WORKER_STATUSES.includes(state.status));
-	if (active.length === 0) return undefined;
-	const counts = new Map<WorkerStatus, number>();
-	for (const state of active) counts.set(state.status, (counts.get(state.status) ?? 0) + 1);
-	const parts = [`${active.length} worker${active.length === 1 ? "" : "s"}`];
-	for (const status of SUMMARY_ORDER) {
-		const count = counts.get(status);
-		if (count) parts.push(`${count} ${status}`);
-	}
-	return `delegate: ${parts.join(", ")}`;
 }

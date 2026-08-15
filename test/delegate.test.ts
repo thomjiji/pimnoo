@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { applyTaskLimits, isDelegateWorkerProcess, WorkerSupervisor } from "../extensions/delegate/supervisor.ts";
-import { fleetListLines, formatLogsText, formatProgressText, formatReportText, formatStatusText, statusSummaryText } from "../extensions/delegate/format.ts";
+import { fleetListLines, formatLogsText, formatProgressText, formatReportText, formatStatusText } from "../extensions/delegate/format.ts";
 
 const execFileAsync = promisify(execFile);
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -466,10 +466,6 @@ test("formats bounded, task-scoped tool results", () => {
 	assert.match(report, /final: x{500}.+\.\.\.$/m);
 	assert.equal(report.includes("x".repeat(2001)), false);
 
-	const summary = statusSummaryText(states);
-	assert.equal(summary, "delegate: 1 worker, 1 running");
-	assert.equal(statusSummaryText([]), undefined);
-	assert.equal(statusSummaryText([{ ...states[0] }]), undefined);
 });
 
 test("stop terminates a completed worker's process", async () => {
@@ -787,13 +783,49 @@ test("renders fleet list rows with selection and expansion", () => {
 	const beta = { ...base, taskId: "task-b", sessionName: "subagent/two", status: "waiting", lastTool: undefined, toolElapsedMs: 0, elapsedMs: 60_000, activity: ["10:00:03 run settled"] };
 	const done = { ...base, taskId: "task-c", sessionName: "subagent/three", status: "completed", elapsedMs: 10_000, activity: [] };
 
-	const lines = fleetListLines([alpha, beta, done], 1);
-	assert.equal(lines[0], "  subagent/one: running · turn 3 · bash 12s · 4m00s");
-	assert.equal(lines[1], "● subagent/two: waiting · turn 3 · 1m00s");
+	const lines = fleetListLines([alpha, beta, done]);
+	assert.equal(lines[0], "delegate: 2 active workers");
+	assert.equal(lines[1], "  subagent/one: running · turn 3 · bash 12s · 4m00s");
+	assert.equal(lines[2], "  subagent/two: waiting · turn 3 · 1m00s");
 	assert.equal(lines.includes("subagent/three"), false);
 
-	const expanded = fleetListLines([alpha, beta], 0, { taskId: "task-a", lines: alpha.activity });
-	assert.equal(expanded.length, 4);
-	assert.match(expanded[1], /turn 3 started/);
-	assert.match(expanded[2], /tool bash started/);
+	// Windowed: with seven workers only five rows render, plus a more indicator.
+	const many = Array.from({ length: 7 }, (_, i) => ({ ...alpha, taskId: `task-${i}`, elapsedMs: 240_000 - i * 1000 }));
+	const windowed = fleetListLines(many);
+	assert.equal(windowed.length, 7);
+	assert.match(windowed[windowed.length - 1], /↓ 2 more/);
+});
+
+test("fleet list renders footer entries, lingers finished workers, and clears on dispose", async () => {
+	const { FleetList } = await import("../extensions/delegate/fleet-list.ts");
+	const entries = new Map<string, string | undefined>();
+	const ui = {
+		setStatus(key: string, text: string | undefined) {
+			entries.set(key, text);
+		},
+	};
+	let states: Array<{ taskId: string; sessionName: string; status: string; turns: number; lastTool?: string; toolElapsedMs?: number; elapsedMs?: number; completedAt?: number }> = [];
+	const fleet = new FleetList(() => states as never, { lingerMs: 60, tickMs: 50 });
+	try {
+		states = [
+			{ taskId: "task-a", sessionName: "subagent/a", status: "running", turns: 2, lastTool: "bash", toolElapsedMs: 3000, elapsedMs: 20000 },
+		];
+		fleet.update(ui, states as never);
+		assert.equal(entries.get("delegate-fleet-0"), "delegate: 1 active worker");
+		assert.match(entries.get("delegate-fleet-1") ?? "", /subagent\/a: running · turn 2 · bash 3s · 20s/);
+
+		// Finished workers linger briefly before dropping out.
+		states = [
+			{ taskId: "task-a", sessionName: "subagent/a", status: "completed", turns: 2, elapsedMs: 21000, completedAt: Date.now() },
+		];
+		fleet.update(ui, states as never);
+		assert.match(entries.get("delegate-fleet-1") ?? "", /subagent\/a: completed/);
+
+		await new Promise((resolvePromise) => setTimeout(resolvePromise, 120));
+		fleet.update(ui, states as never);
+		assert.equal(entries.get("delegate-fleet-0"), undefined);
+		assert.equal(entries.get("delegate-fleet-1"), undefined);
+	} finally {
+		fleet.dispose();
+	}
 });

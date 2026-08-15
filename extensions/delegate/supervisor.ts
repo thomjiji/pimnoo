@@ -126,12 +126,14 @@ export interface WorkerTaskState extends WorkerStartResult {
 	diagnostics?: string;
 	exitCode?: number | null;
 	exitSignal?: string | null;
-	/** Milliseconds since the worker process started. */
+	/** Milliseconds since the worker process started (frozen once terminal). */
 	elapsedMs?: number;
 	/** Milliseconds the current tool has been running (0 when idle). */
 	toolElapsedMs?: number;
 	/** Bounded tail of recent activity lines, oldest first. */
 	activity?: string[];
+	/** Wall-clock time the worker first reached a terminal state. */
+	completedAt?: number;
 }
 
 export interface GitResult {
@@ -391,7 +393,7 @@ export class WorkerSupervisor {
 		const now = Date.now();
 		return {
 			...worker.state,
-			elapsedMs: now - worker.startedAt,
+			elapsedMs: (worker.state.completedAt ?? now) - worker.startedAt,
 			toolElapsedMs: worker.toolStartedAt !== undefined && worker.state.lastTool ? now - worker.toolStartedAt : 0,
 			activity: [...worker.activity],
 		};
@@ -407,7 +409,10 @@ export class WorkerSupervisor {
 		if (worker.state.status === status) return;
 		if (STICKY_STATUSES.includes(worker.state.status)) return;
 		worker.state.status = status;
-		if (TERMINAL_WORKER_STATUSES.includes(status)) this.clearTimers(worker);
+		if (TERMINAL_WORKER_STATUSES.includes(status)) {
+			if (worker.state.completedAt === undefined) worker.state.completedAt = Date.now();
+			this.clearTimers(worker);
+		}
 		this.onStateChange?.();
 		this.resolveWaiters();
 	}
@@ -711,6 +716,7 @@ export class WorkerSupervisor {
 		// Parent-initiated termination is authoritative; bypass the sticky guard
 		// in case settle reconciliation already classified the aborted run.
 		worker.state.status = status;
+		if (worker.state.completedAt === undefined) worker.state.completedAt = Date.now();
 		worker.terminating = false;
 		this.clearTimers(worker);
 		this.onStateChange?.();
