@@ -53,7 +53,7 @@ export class FleetList {
 			this.stopTimer();
 			return;
 		}
-		ui.setWidget(FLEET_WIDGET_KEY, fleetListLines(visible), { placement: "belowEditor" });
+		ui.setWidget(FLEET_WIDGET_KEY, fleetListLines(visible), { placement: "aboveEditor" });
 		if (!this.timer) this.timer = setInterval(() => this.tick(), this.tickMs);
 	}
 

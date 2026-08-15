@@ -783,17 +783,18 @@ test("renders fleet list rows with selection and expansion", () => {
 	const beta = { ...base, taskId: "task-b", sessionName: "subagent/two", status: "waiting", lastTool: undefined, toolElapsedMs: 0, elapsedMs: 60_000, activity: ["10:00:03 run settled"] };
 	const done = { ...base, taskId: "task-c", sessionName: "subagent/three", status: "completed", elapsedMs: 10_000, activity: [] };
 
+	const stripAnsi = (text: string) => text.replace(/\x1b\[[0-9;]*m/g, "");
 	const lines = fleetListLines([alpha, beta, done]);
-	assert.equal(lines[0], "delegate: 2 active workers");
-	assert.equal(lines[1], "  subagent/one: running · turn 3 · bash 12s · 4m00s");
-	assert.equal(lines[2], "  subagent/two: waiting · turn 3 · 1m00s");
+	assert.equal(stripAnsi(lines[0]), "delegate: 2 active workers");
+	assert.equal(stripAnsi(lines[1]), "├─ subagent/one: running · turn 3 · bash 12s · 4m00s");
+	assert.equal(stripAnsi(lines[2]), "└─ subagent/two: waiting · turn 3 · 1m00s");
 	assert.equal(lines.includes("subagent/three"), false);
 
 	// Windowed: with seven workers only five rows render, plus a more indicator.
 	const many = Array.from({ length: 7 }, (_, i) => ({ ...alpha, taskId: `task-${i}`, elapsedMs: 240_000 - i * 1000 }));
 	const windowed = fleetListLines(many);
 	assert.equal(windowed.length, 7);
-	assert.match(windowed[windowed.length - 1], /↓ 2 more/);
+	assert.match(stripAnsi(windowed[windowed.length - 1]), /└─ ↓ 2 more/);
 });
 
 test("fleet list renders widget lines, lingers finished workers, and clears on dispose", async () => {
@@ -810,16 +811,17 @@ test("fleet list renders widget lines, lingers finished workers, and clears on d
 		states = [
 			{ taskId: "task-a", sessionName: "subagent/a", status: "running", turns: 2, lastTool: "bash", toolElapsedMs: 3000, elapsedMs: 20000 },
 		];
+		const stripAnsi = (text: string) => text.replace(/\x1b\[[0-9;]*m/g, "");
 		fleet.update(ui, states as never);
-		assert.equal(seen.at(-1)?.[0], "delegate: 1 active worker");
-		assert.match(seen.at(-1)?.[1] ?? "", /subagent\/a: running · turn 2 · bash 3s · 20s/);
+		assert.equal(stripAnsi(seen.at(-1)?.[0] ?? ""), "delegate: 1 active worker");
+		assert.match(stripAnsi(seen.at(-1)?.[1] ?? ""), /subagent\/a: running · turn 2 · bash 3s · 20s/);
 
 		// Finished workers linger briefly before dropping out.
 		states = [
 			{ taskId: "task-a", sessionName: "subagent/a", status: "completed", turns: 2, elapsedMs: 21000, completedAt: Date.now() },
 		];
 		fleet.update(ui, states as never);
-		assert.match(seen.at(-1)?.[1] ?? "", /subagent\/a: completed/);
+		assert.match(stripAnsi(seen.at(-1)?.[1] ?? ""), /subagent\/a: completed/);
 
 		await new Promise((resolvePromise) => setTimeout(resolvePromise, 120));
 		fleet.update(ui, states as never);
