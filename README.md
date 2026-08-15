@@ -64,6 +64,8 @@ pi install -l git:github.com/<account>/pimono
 pi install /path/to/pimono
 ```
 
+只开发单个组件时可以只挂载该组件而不切换整个包：在 `~/.pi/agent/settings.json` 的 `packages` 里用对象形式把该组件从 git 源排除（例如 `{"source": "git:github.com/<account>/pimono", "extensions": ["!extensions/<name>/**"]}`），同时在 `extensions` 数组里挂载 checkout 里的组件目录；新组件直接挂载即可。修改 settings 后 `/reload`，并确认每个扩展只加载一次——同一个组件从两个来源加载会重复注册。
+
 Windows 主机可以在 settings 中使用主机路径，例如 `C:\Users\<name>\git\pimono`。如果 Pi 在 WSL、容器或其他 runtime 中运行，应把这个路径替换为该 runtime 能访问的对应路径；扩展代码不包含任何环境专用 loader path。
 
 在 Pi 中修改扩展后运行 `/reload`。`/reload` 会重新加载 package 管理的 extensions；不需要复制文件或重启 Pi。开发期间也可以用一次性加载检查 package：
