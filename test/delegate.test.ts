@@ -797,12 +797,20 @@ test("renders fleet list rows with selection and expansion", () => {
 	assert.match(stripAnsi(windowed[windowed.length - 1]), /└─ ↓ 2 more/);
 });
 
-test("fleet list renders widget lines, lingers finished workers, and clears on dispose", async () => {
+test("fleet list renders themed widget lines, lingers finished workers, and clears on dispose", async () => {
 	const { FleetList } = await import("../extensions/delegate/fleet-list.ts");
-	const seen: Array<string[] | undefined> = [];
+	const rendered: string[][] = [];
+	let cleared = 0;
+	const fakeTheme = { bold: (text: string) => `B(${text})`, fg: (name: string, text: string) => `${name}(${text})` };
+	let factory: ((tui: unknown, theme: typeof fakeTheme) => { render(): string[] }) | undefined;
 	const ui = {
-		setWidget(_key: string, lines: string[] | undefined) {
-			seen.push(lines);
+		setWidget(_key: string, content: undefined | typeof factory) {
+			if (content === undefined) {
+				cleared += 1;
+				factory = undefined;
+			} else {
+				factory = content;
+			}
 		},
 	};
 	let states: Array<{ taskId: string; sessionName: string; status: string; turns: number; lastTool?: string; toolElapsedMs?: number; elapsedMs?: number; completedAt?: number }> = [];
@@ -811,21 +819,23 @@ test("fleet list renders widget lines, lingers finished workers, and clears on d
 		states = [
 			{ taskId: "task-a", sessionName: "subagent/a", status: "running", turns: 2, lastTool: "bash", toolElapsedMs: 3000, elapsedMs: 20000 },
 		];
-		const stripAnsi = (text: string) => text.replace(/\x1b\[[0-9;]*m/g, "");
 		fleet.update(ui, states as never);
-		assert.equal(stripAnsi(seen.at(-1)?.[0] ?? ""), "delegate: 1 active worker");
-		assert.match(stripAnsi(seen.at(-1)?.[1] ?? ""), /subagent\/a: running · turn 2 · bash 3s · 20s/);
+		assert.ok(factory, "widget factory should be registered");
+		rendered.push(factory?.({}, fakeTheme)?.render() ?? []);
+		assert.equal(rendered.at(-1)?.[0], "B(delegate: 1 active worker)");
+		assert.equal(rendered.at(-1)?.[1], "dim(└─ subagent/a: running · turn 2 · bash 3s · 20s)");
 
 		// Finished workers linger briefly before dropping out.
 		states = [
 			{ taskId: "task-a", sessionName: "subagent/a", status: "completed", turns: 2, elapsedMs: 21000, completedAt: Date.now() },
 		];
 		fleet.update(ui, states as never);
-		assert.match(stripAnsi(seen.at(-1)?.[1] ?? ""), /subagent\/a: completed/);
+		rendered.push(factory?.({}, fakeTheme)?.render() ?? []);
+		assert.match(rendered.at(-1)?.[1] ?? "", /subagent\/a: completed/);
 
 		await new Promise((resolvePromise) => setTimeout(resolvePromise, 120));
 		fleet.update(ui, states as never);
-		assert.equal(seen.at(-1), undefined);
+		assert.ok(cleared >= 1, "widget should clear once the linger window passes");
 	} finally {
 		fleet.dispose();
 	}

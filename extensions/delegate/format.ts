@@ -85,15 +85,11 @@ export function formatLogsText(state: WorkerTaskState): string {
 
 const MAX_FLEET_ROWS = 5;
 
-/** Bright white for the list header, dim gray for worker rows. */
-export const FLEET_HEADER_STYLE = "\x1b[1;97m";
-export const FLEET_ROW_STYLE = "\x1b[90m";
-export const FLEET_STYLE_RESET = "\x1b[0m";
-
 /**
- * Render-only fleet list lines for the widget: a bright header with the
- * active count, one dim box-drawing row per worker (active first, then
- * recently finished), and a "↓ N more" indicator when windowed.
+ * Render-only fleet list lines for the widget: a header with the active
+ * count, one box-drawing row per worker (active first, then recently
+ * finished), and a "↓ N more" indicator when windowed. Plain text;
+ * the widget applies theme colors (bold header, dim rows).
  */
 export function fleetListLines(states: WorkerTaskState[]): string[] {
 	const active = states.filter((state) => !TERMINAL_WORKER_STATUSES.includes(state.status));
@@ -105,7 +101,7 @@ export function fleetListLines(states: WorkerTaskState[]): string[] {
 			if (aTerminal !== bTerminal) return aTerminal - bTerminal;
 			return (b.elapsedMs ?? 0) - (a.elapsedMs ?? 0);
 		});
-	const lines = [`${FLEET_HEADER_STYLE}delegate: ${active.length} active worker${active.length === 1 ? "" : "s"}${FLEET_STYLE_RESET}`];
+	const lines = [`delegate: ${active.length} active worker${active.length === 1 ? "" : "s"}`];
 	const shown = ordered.slice(0, MAX_FLEET_ROWS);
 	shown.forEach((state, index) => {
 		const parts = [`${state.sessionName}: ${state.status}`];
@@ -113,8 +109,8 @@ export function fleetListLines(states: WorkerTaskState[]): string[] {
 		if (state.status === "running" && state.lastTool) parts.push(`${state.lastTool} ${formatDuration(state.toolElapsedMs ?? 0)}`);
 		if (state.elapsedMs !== undefined) parts.push(formatDuration(state.elapsedMs));
 		const branch = index === shown.length - 1 && ordered.length <= MAX_FLEET_ROWS ? "└─" : "├─";
-		lines.push(`${FLEET_ROW_STYLE}${branch} ${parts.join(" · ")}${FLEET_STYLE_RESET}`);
+		lines.push(`${branch} ${parts.join(" · ")}`);
 	});
-	if (ordered.length > MAX_FLEET_ROWS) lines.push(`${FLEET_ROW_STYLE}└─ ↓ ${ordered.length - MAX_FLEET_ROWS} more${FLEET_STYLE_RESET}`);
+	if (ordered.length > MAX_FLEET_ROWS) lines.push(`└─ ↓ ${ordered.length - MAX_FLEET_ROWS} more`);
 	return lines;
 }
