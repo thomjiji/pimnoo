@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { applyTaskLimits, isDelegateWorkerProcess, WorkerSupervisor } from "../extensions/delegate/supervisor.ts";
-import { formatLogsText, formatProgressText, formatReportText, formatStatusText, statusSummaryText } from "../extensions/delegate/format.ts";
+import { fleetListLines, formatLogsText, formatProgressText, formatReportText, formatStatusText, statusSummaryText } from "../extensions/delegate/format.ts";
 
 const execFileAsync = promisify(execFile);
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -768,4 +768,33 @@ test("formats progress, logs, and widget lines for the TUI surfaces", () => {
 	assert.match(logs, /task-run \(subagent\/runner\): running/);
 	assert.match(logs, /tool bash started/);
 	assert.equal(formatLogsText({ ...running, activity: [] }), "task-run (subagent/runner): running\n  (no activity recorded)");
+});
+
+test("renders fleet list rows with selection and expansion", () => {
+	const base = {
+		branch: "subagent/task-1",
+		cwd: "/tmp/wt-1",
+		sessionName: "subagent/one",
+		turns: 3,
+		pendingSteering: 0,
+		pendingFollowUps: 0,
+		worktree: "/tmp/wt-1",
+		sessionFile: "/sessions/one.jsonl",
+		lastTool: "bash",
+		toolElapsedMs: 12_000,
+	} as const;
+	const alpha = { ...base, taskId: "task-a", status: "running", elapsedMs: 240_000, activity: ["10:00:01 turn 3 started", "10:00:02 tool bash started"] };
+	const beta = { ...base, taskId: "task-b", sessionName: "subagent/two", status: "waiting", lastTool: undefined, toolElapsedMs: 0, elapsedMs: 60_000, activity: ["10:00:03 run settled"] };
+	const done = { ...base, taskId: "task-c", sessionName: "subagent/three", status: "completed", elapsedMs: 10_000, activity: [] };
+
+	const lines = fleetListLines([alpha, beta, done], 1);
+	assert.equal(lines[0], "delegate: 2 active workers");
+	assert.equal(lines[1], "  subagent/one: running · turn 3 · bash 12s · 4m00s");
+	assert.equal(lines[2], "● subagent/two: waiting · turn 3 · 1m00s");
+	assert.equal(lines.includes("subagent/three"), false);
+
+	const expanded = fleetListLines([alpha, beta], 0, { taskId: "task-a", lines: alpha.activity });
+	assert.equal(expanded.length, 5);
+	assert.match(expanded[2], /turn 3 started/);
+	assert.match(expanded[3], /tool bash started/);
 });

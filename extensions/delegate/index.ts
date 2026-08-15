@@ -1,6 +1,7 @@
 import { Type } from "typebox";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { applyTaskLimits, isDelegateWorkerProcess, WorkerSupervisor } from "./supervisor.ts";
+import { FleetList } from "./fleet-list.ts";
 import { formatLogsText, formatProgressText, formatReportText, formatStartText, formatStatusText, formatStopText, statusSummaryText } from "./format.ts";
 import type { WorkerTaskState } from "./supervisor.ts";
 
@@ -56,12 +57,17 @@ export default function (pi: ExtensionAPI) {
 	const supervisor = new WorkerSupervisor({
 		onStateChange: () => refreshSurfaces(),
 	});
+	const fleetList = new FleetList(() => supervisor.list());
 
 	function refreshSurfaces(ctx?: ExtensionContext): void {
-		if (ctx) lastUi = ctx.ui;
+		if (ctx) {
+			lastUi = ctx.ui;
+			fleetList.setUICtx(ctx.ui);
+		}
 		if (!lastUi) return;
 		try {
 			lastUi.setStatus("delegate", statusSummaryText(supervisor.list()));
+			fleetList.update();
 		} catch {
 			// Status surfaces are best effort; never break the supervisor for them.
 		}
@@ -171,6 +177,7 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("session_shutdown", async () => {
+		fleetList.dispose();
 		try {
 			lastUi?.setStatus("delegate", undefined);
 		} catch {
