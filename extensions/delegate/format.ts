@@ -84,31 +84,6 @@ export function formatLogsText(state: WorkerTaskState): string {
 	const body = (state.activity ?? []).join("\n");
 	return `${header}\n${body || "  (no activity recorded)"}`;
 }
-
-const MAX_WIDGET_WORKERS = 5;
-
-/**
- * Compact multi-line panel for active workers, rendered through
- * ctx.ui.setWidget. Returns undefined when no worker is active so the
- * caller clears the widget.
- */
-export function widgetLines(states: WorkerTaskState[]): string[] | undefined {
-	const active = states.filter((state) => !TERMINAL_WORKER_STATUSES.includes(state.status));
-	if (active.length === 0) return undefined;
-	const lines = [`delegate: ${active.length} active worker${active.length === 1 ? "" : "s"}`];
-	for (const state of active.slice(0, MAX_WIDGET_WORKERS)) {
-		const parts = [`${state.sessionName}: ${state.status}`];
-		if (state.turns > 0) parts.push(`turn ${state.turns}`);
-		if (state.status === "running" && state.lastTool) parts.push(`${state.lastTool} ${formatDuration(state.toolElapsedMs ?? 0)}`);
-		if (state.elapsedMs !== undefined) parts.push(formatDuration(state.elapsedMs));
-		lines.push(parts.join(" · "));
-		const last = state.activity?.[state.activity.length - 1];
-		if (last) lines.push(`  ${last}`);
-	}
-	if (active.length > MAX_WIDGET_WORKERS) lines.push(`  ...and ${active.length - MAX_WIDGET_WORKERS} more`);
-	return lines;
-}
-
 /**
  * One-line footer summary for active workers only. Returns undefined when
  * every worker is terminal or settled, so the caller clears the status entry

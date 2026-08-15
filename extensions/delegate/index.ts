@@ -1,7 +1,7 @@
 import { Type } from "typebox";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { applyTaskLimits, isDelegateWorkerProcess, TERMINAL_WORKER_STATUSES, WorkerSupervisor } from "./supervisor.ts";
-import { formatLogsText, formatProgressText, formatReportText, formatStartText, formatStatusText, formatStopText, statusSummaryText, widgetLines } from "./format.ts";
+import { applyTaskLimits, isDelegateWorkerProcess, WorkerSupervisor } from "./supervisor.ts";
+import { formatLogsText, formatProgressText, formatReportText, formatStartText, formatStatusText, formatStopText, statusSummaryText } from "./format.ts";
 import type { WorkerTaskState } from "./supervisor.ts";
 
 const workerTaskSchema = Type.Object({
@@ -47,14 +47,12 @@ function requireString(value: unknown, action: string, field: string): string {
 
 interface UiStatusSink {
 	setStatus(key: string, text: string | undefined): void;
-	setWidget(key: string, lines: string[] | undefined): void;
 }
 
 export default function (pi: ExtensionAPI) {
 	if (isDelegateWorkerProcess()) return;
 
 	let lastUi: UiStatusSink | undefined;
-	let surfaceTimer: ReturnType<typeof setInterval> | undefined;
 	const supervisor = new WorkerSupervisor({
 		onStateChange: () => refreshSurfaces(),
 	});
@@ -62,22 +60,10 @@ export default function (pi: ExtensionAPI) {
 	function refreshSurfaces(ctx?: ExtensionContext): void {
 		if (ctx) lastUi = ctx.ui;
 		if (!lastUi) return;
-		const states = supervisor.list();
 		try {
-			lastUi.setStatus("delegate", statusSummaryText(states));
-			lastUi.setWidget("delegate", widgetLines(states));
+			lastUi.setStatus("delegate", statusSummaryText(supervisor.list()));
 		} catch {
 			// Status surfaces are best effort; never break the supervisor for them.
-		}
-		// While any worker is active, keep the widget fresh without waiting
-		// for the next transition, so tool durations and turns stay current.
-		if (states.some((state) => !TERMINAL_WORKER_STATUSES.includes(state.status))) {
-			if (!surfaceTimer) {
-				surfaceTimer = setInterval(() => refreshSurfaces(), 2000);
-			}
-		} else if (surfaceTimer) {
-			clearInterval(surfaceTimer);
-			surfaceTimer = undefined;
 		}
 	}
 
@@ -185,10 +171,7 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("session_shutdown", async () => {
-		if (surfaceTimer) clearInterval(surfaceTimer);
-		surfaceTimer = undefined;
 		try {
-			lastUi?.setWidget("delegate", undefined);
 			lastUi?.setStatus("delegate", undefined);
 		} catch {
 			// Best effort cleanup.

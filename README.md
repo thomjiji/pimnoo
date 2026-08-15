@@ -26,7 +26,9 @@
 - `stop`：中止并终止指定 worker，保留其 session 和 worktree 供检查。
 - `logs`：返回指定 worker 的有界最近活动（turn、工具调用与结果、assistant 文本），用于判断它当前在做什么。
 
-`delegate wait` 等待期间会周期性地把每个目标 worker 的进度行（状态、turn、当前工具与耗时、总耗时）流进主对话流；有活跃 worker 时，编辑器上方会显示紧凑的实时面板，全部结束后自动清除。顶层 `maxTurns`、`softTurnThreshold`、`timeoutMs` 可以作为所有 task 的默认值，task 内的显式值优先。
+`delegate wait` 等待期间会周期性地把每个目标 worker 的进度行（状态、turn、当前工具与耗时、总耗时）流进主对话流；`delegate logs <taskId>` 可以拉取指定 worker 的最近活动。顶层 `maxTurns`、`softTurnThreshold`、`timeoutMs` 可以作为所有 task 的默认值，task 内的显式值优先。
+
+查看子会话走 Pi 原生 session 机制而不是弹窗：给 `app.session.resume` 绑定一个键（例如 `~/.pi/agent/keybindings.json` 里 `"app.session.resume": ["ctrl+j"]`），按键后在 `/resume` 的 All 范围用方向键选择并回车进入任意 `subagent/*` 会话——主 TUI 直接切换视图，`/resume` 再切回主会话。worker 运行期间子会话的 JSONL 随消息完成持续落盘，切换进去即可看到它已产生的会话流。
 
 每个 worker 使用独立的 Git worktree 和持久 RPC session，完成后不会自动合并、提交或删除 worktree。每个 task 可选配置 `maxTurns`（默认 60）、`softTurnThreshold`（默认 `maxTurns - 2`）和 `timeoutMs`（默认不设）：达到软阈值会收到收尾 steering 并进入 `wrapping up`；硬限制后宽限期内未 settle 会被 abort 并标记 `limit-reached`；总超时终止并标记 `timed-out`。返回给主 Pi 的最终文本有 2000 字符上限，完整对话仍保存在 worker session JSONL 中。
 

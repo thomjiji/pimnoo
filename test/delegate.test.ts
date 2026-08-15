@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { applyTaskLimits, isDelegateWorkerProcess, WorkerSupervisor } from "../extensions/delegate/supervisor.ts";
-import { formatLogsText, formatProgressText, formatReportText, formatStatusText, statusSummaryText, widgetLines } from "../extensions/delegate/format.ts";
+import { formatLogsText, formatProgressText, formatReportText, formatStatusText, statusSummaryText } from "../extensions/delegate/format.ts";
 
 const execFileAsync = promisify(execFile);
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -768,11 +768,4 @@ test("formats progress, logs, and widget lines for the TUI surfaces", () => {
 	assert.match(logs, /task-run \(subagent\/runner\): running/);
 	assert.match(logs, /tool bash started/);
 	assert.equal(formatLogsText({ ...running, activity: [] }), "task-run (subagent/runner): running\n  (no activity recorded)");
-
-	const lines = widgetLines([running, done]);
-	assert.ok(lines, "widget should show while a worker is active");
-	assert.equal(lines[0], "delegate: 1 active worker");
-	assert.match(lines[1], /subagent\/runner: running · turn 3 · bash 45s · 4m12s/);
-	assert.equal(lines.some((line) => line.includes("subagent/finished")), false);
-	assert.equal(widgetLines([done]), undefined);
 });
