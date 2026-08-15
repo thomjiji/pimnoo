@@ -796,12 +796,12 @@ test("renders fleet list rows with selection and expansion", () => {
 	assert.match(windowed[windowed.length - 1], /↓ 2 more/);
 });
 
-test("fleet list renders footer entries, lingers finished workers, and clears on dispose", async () => {
+test("fleet list renders widget lines, lingers finished workers, and clears on dispose", async () => {
 	const { FleetList } = await import("../extensions/delegate/fleet-list.ts");
-	const entries = new Map<string, string | undefined>();
+	const seen: Array<string[] | undefined> = [];
 	const ui = {
-		setStatus(key: string, text: string | undefined) {
-			entries.set(key, text);
+		setWidget(_key: string, lines: string[] | undefined) {
+			seen.push(lines);
 		},
 	};
 	let states: Array<{ taskId: string; sessionName: string; status: string; turns: number; lastTool?: string; toolElapsedMs?: number; elapsedMs?: number; completedAt?: number }> = [];
@@ -811,20 +811,19 @@ test("fleet list renders footer entries, lingers finished workers, and clears on
 			{ taskId: "task-a", sessionName: "subagent/a", status: "running", turns: 2, lastTool: "bash", toolElapsedMs: 3000, elapsedMs: 20000 },
 		];
 		fleet.update(ui, states as never);
-		assert.equal(entries.get("delegate-fleet-0"), "delegate: 1 active worker");
-		assert.match(entries.get("delegate-fleet-1") ?? "", /subagent\/a: running · turn 2 · bash 3s · 20s/);
+		assert.equal(seen.at(-1)?.[0], "delegate: 1 active worker");
+		assert.match(seen.at(-1)?.[1] ?? "", /subagent\/a: running · turn 2 · bash 3s · 20s/);
 
 		// Finished workers linger briefly before dropping out.
 		states = [
 			{ taskId: "task-a", sessionName: "subagent/a", status: "completed", turns: 2, elapsedMs: 21000, completedAt: Date.now() },
 		];
 		fleet.update(ui, states as never);
-		assert.match(entries.get("delegate-fleet-1") ?? "", /subagent\/a: completed/);
+		assert.match(seen.at(-1)?.[1] ?? "", /subagent\/a: completed/);
 
 		await new Promise((resolvePromise) => setTimeout(resolvePromise, 120));
 		fleet.update(ui, states as never);
-		assert.equal(entries.get("delegate-fleet-0"), undefined);
-		assert.equal(entries.get("delegate-fleet-1"), undefined);
+		assert.equal(seen.at(-1), undefined);
 	} finally {
 		fleet.dispose();
 	}

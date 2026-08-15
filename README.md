@@ -28,7 +28,7 @@
 
 `delegate wait` 等待期间会周期性地把每个目标 worker 的进度行（状态、turn、当前工具与耗时、总耗时）流进主对话流；`delegate logs <taskId>` 可以拉取指定 worker 的最近活动。顶层 `maxTurns`、`softTurnThreshold`、`timeoutMs` 可以作为所有 task 的默认值，task 内的显式值优先。
 
-有活跃 worker 时，底部状态栏会常驻显示 worker 列表：每行一个 worker 的状态（turn、当前工具与耗时、总耗时），每 200ms 刷新；最多显示 5 行，超出折叠为 `↓ N more`；worker 结束后其行会停留几秒再消失。列表是纯显示，不占用任何按键。
+有活跃 worker 时，编辑器下方（footer 上方）会常驻显示 worker 列表：每行一个 worker 的状态（turn、当前工具与耗时、总耗时），每 200ms 刷新；最多显示 5 行，超出折叠为 `↓ N more`；worker 结束后其行会停留几秒再消失。列表是纯显示，不占用任何按键。Pi 的 footer 只能渲染单行，因此多行列表使用下方 widget 表面。
 
 查看子会话走 Pi 原生 session 机制而不是弹窗：给 `app.session.resume` 绑定一个键（例如 `~/.pi/agent/keybindings.json` 里 `"app.session.resume": ["ctrl+j"]`），按键后在 `/resume` 的 All 范围用方向键选择并回车进入任意 `subagent/*` 会话——主 TUI 直接切换视图，`/resume` 再切回主会话。worker 运行期间子会话的 JSONL 随消息完成持续落盘，切换进去即可看到它已产生的会话流。
 
