@@ -54,10 +54,44 @@ export default function (pi: ExtensionAPI) {
 	if (isDelegateWorkerProcess()) return;
 
 	const supervisor = new WorkerSupervisor({
-		onStateChange: () => refreshSurfaces(),
+		onStateChange: () => {
+			refreshSurfaces();
+			reportTerminalWorkers();
+		},
 	});
 	const fleetList = new FleetList(() => supervisor.list());
 	let lastUi: UiStatusSink | undefined;
+
+	// Completion entries appended to the main transcript when a worker
+	// reaches a terminal state. Display-only: custom entries never enter
+	// the LLM context, so the reports stay visible without polluting the
+	// main agent's context; wait/status still carry the full text.
+	pi.registerEntryRenderer<WorkerReportEntry>("delegate-worker-report", (entry, _options, theme) => {
+		if (!entry.data) return undefined;
+		return new Text(workerReportText(entry.data, theme), 0, 0);
+	});
+	const reportedTerminal = new Set<string>();
+	function reportTerminalWorkers(): void {
+		for (const state of supervisor.list()) {
+			if (!TERMINAL_WORKER_STATUSES.includes(state.status)) continue;
+			if (reportedTerminal.has(state.taskId)) continue;
+			reportedTerminal.add(state.taskId);
+			try {
+				pi.appendEntry<WorkerReportEntry>("delegate-worker-report", {
+					taskId: state.taskId,
+					sessionName: state.sessionName,
+					status: state.status,
+					turns: state.turns,
+					elapsedMs: state.elapsedMs,
+					finalText: state.finalText,
+					error: state.error,
+					sessionFile: state.sessionFile,
+				});
+			} catch {
+				// The session may be shutting down; the entry is best effort.
+			}
+		}
+	}
 
 	function refreshSurfaces(ctx?: ExtensionContext): void {
 		if (ctx) lastUi = ctx.ui;
