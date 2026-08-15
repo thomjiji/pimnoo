@@ -85,18 +85,19 @@ export function formatLogsText(state: WorkerTaskState): string {
 	return `${header}\n${body || "  (no activity recorded)"}`;
 }
 
+const MAX_FLEET_ROWS = 6;
+
 /**
- * Render-only fleet list lines for the below-editor widget: one row per active
- * worker (earliest launched first) with a selection marker, plus the selected
+ * Render-only fleet list rows for the footer: one row per active worker
+ * (earliest launched first) with a selection marker, plus the selected
  * worker's recent activity lines when expanded.
  */
 export function fleetListLines(states: WorkerTaskState[], selectedIndex: number, expanded?: { taskId: string; lines: string[] }): string[] {
 	const active = states
 		.filter((state) => !TERMINAL_WORKER_STATUSES.includes(state.status))
 		.sort((a, b) => (b.elapsedMs ?? 0) - (a.elapsedMs ?? 0));
-	if (active.length === 0) return [];
-	const lines = [`delegate: ${active.length} active worker${active.length === 1 ? "" : "s"}`];
-	active.forEach((state, index) => {
+	const lines: string[] = [];
+	active.slice(0, MAX_FLEET_ROWS).forEach((state, index) => {
 		const parts = [`${state.sessionName}: ${state.status}`];
 		if (state.turns > 0) parts.push(`turn ${state.turns}`);
 		if (state.status === "running" && state.lastTool) parts.push(`${state.lastTool} ${formatDuration(state.toolElapsedMs ?? 0)}`);
@@ -106,6 +107,7 @@ export function fleetListLines(states: WorkerTaskState[], selectedIndex: number,
 			for (const line of expanded.lines.slice(-5)) lines.push(`   ${line}`);
 		}
 	});
+	if (active.length > MAX_FLEET_ROWS) lines.push(`   ...and ${active.length - MAX_FLEET_ROWS} more`);
 	return lines;
 }
 /**

@@ -788,13 +788,12 @@ test("renders fleet list rows with selection and expansion", () => {
 	const done = { ...base, taskId: "task-c", sessionName: "subagent/three", status: "completed", elapsedMs: 10_000, activity: [] };
 
 	const lines = fleetListLines([alpha, beta, done], 1);
-	assert.equal(lines[0], "delegate: 2 active workers");
-	assert.equal(lines[1], "  subagent/one: running · turn 3 · bash 12s · 4m00s");
-	assert.equal(lines[2], "● subagent/two: waiting · turn 3 · 1m00s");
+	assert.equal(lines[0], "  subagent/one: running · turn 3 · bash 12s · 4m00s");
+	assert.equal(lines[1], "● subagent/two: waiting · turn 3 · 1m00s");
 	assert.equal(lines.includes("subagent/three"), false);
 
 	const expanded = fleetListLines([alpha, beta], 0, { taskId: "task-a", lines: alpha.activity });
-	assert.equal(expanded.length, 5);
-	assert.match(expanded[2], /turn 3 started/);
-	assert.match(expanded[3], /tool bash started/);
+	assert.equal(expanded.length, 4);
+	assert.match(expanded[1], /turn 3 started/);
+	assert.match(expanded[2], /tool bash started/);
 });
