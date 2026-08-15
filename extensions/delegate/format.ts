@@ -1,3 +1,4 @@
+import { TERMINAL_WORKER_STATUSES } from "./supervisor.ts";
 import type { WorkerStatus, WorkerTaskState } from "./supervisor.ts";
 
 export const MAX_FINAL_TEXT_LENGTH = 2000;
@@ -54,7 +55,7 @@ export function formatStopText(state: WorkerTaskState): string {
 	return `Stopped worker ${state.taskId} (${state.sessionName}): ${state.status}\n  worktree: ${state.worktree}\n  session: ${state.sessionFile}`;
 }
 
-const SUMMARY_ORDER: readonly WorkerStatus[] = ["starting", "running", "waiting", "completed", "failed", "aborted", "stopped"];
+const SUMMARY_ORDER: readonly WorkerStatus[] = ["starting", "running", "waiting", "wrapping up", "completed", "failed", "aborted", "stopped", "limit-reached", "timed-out"];
 
 /**
  * One-line footer summary for active workers only. Returns undefined when
@@ -62,7 +63,7 @@ const SUMMARY_ORDER: readonly WorkerStatus[] = ["starting", "running", "waiting"
  * instead of leaving stale history in the status bar.
  */
 export function statusSummaryText(states: WorkerTaskState[]): string | undefined {
-	const active = states.filter((state) => state.status === "starting" || state.status === "running" || state.status === "waiting");
+	const active = states.filter((state) => !TERMINAL_WORKER_STATUSES.includes(state.status));
 	if (active.length === 0) return undefined;
 	const counts = new Map<WorkerStatus, number>();
 	for (const state of active) counts.set(state.status, (counts.get(state.status) ?? 0) + 1);

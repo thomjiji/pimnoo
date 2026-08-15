@@ -25,7 +25,9 @@
 - `wait`：等待一个或一组 worker（`taskIds`，默认全部）到达终态并取回与 task ID 关联的最终报告；父会话按 Escape 取消等待。
 - `stop`：中止并终止指定 worker，保留其 session 和 worktree 供检查。
 
-每个 worker 使用独立的 Git worktree 和持久 RPC session，完成后不会自动合并、提交或删除 worktree。状态机区分 `starting`、`running`、`waiting`、`completed`、`failed`、`aborted` 和 `stopped`；主 TUI 的状态栏只在有活跃 worker 时显示单行汇总，全部结束后自动清除。
+每个 worker 使用独立的 Git worktree 和持久 RPC session，完成后不会自动合并、提交或删除 worktree。每个 task 可选配置 `maxTurns`（默认 60）、`softTurnThreshold`（默认 `maxTurns - 2`）和 `timeoutMs`（默认不设）：达到软阈值会收到收尾 steering 并进入 `wrapping up`；硬限制后宽限期内未 settle 会被 abort 并标记 `limit-reached`；总超时终止并标记 `timed-out`。返回给主 Pi 的最终文本有 2000 字符上限，完整对话仍保存在 worker session JSONL 中。
+
+状态机区分 `starting`、`running`、`waiting`、`wrapping up`、`completed`、`failed`、`aborted`、`stopped`、`limit-reached` 和 `timed-out`；主 TUI 的状态栏只在有活跃 worker 时显示单行汇总，全部结束后自动清除。
 
 ## 安全和信任
 

@@ -10,6 +10,9 @@ const workerTaskSchema = Type.Object({
 	role: Type.Optional(Type.String({ description: "Optional role instruction, such as implementer or reviewer." })),
 	model: Type.Optional(Type.String({ description: "Optional provider/model override." })),
 	thinkingLevel: Type.Optional(Type.String({ description: "Optional thinking level override." })),
+	maxTurns: Type.Optional(Type.Integer({ minimum: 1, description: "Hard agent-loop turn limit for this task (default 60)." })),
+	softTurnThreshold: Type.Optional(Type.Integer({ minimum: 1, description: "Turn count at which the worker receives a wrap-up steering message (default maxTurns - 2)." })),
+	timeoutMs: Type.Optional(Type.Integer({ minimum: 1, description: "Total active runtime budget in milliseconds; the worker is terminated when exceeded." })),
 });
 
 interface DelegateParameters {
@@ -113,6 +116,7 @@ export default function (pi: ExtensionAPI) {
 		promptGuidelines: [
 			"Use delegate start to launch workers, delegate status to inspect them, and delegate wait to collect their final reports.",
 			"Use delegate follow_up for messages that should wait until a worker settles; use delegate steer only while a worker is running.",
+			"Set maxTurns, softTurnThreshold, or timeoutMs per task to bound worker runtime; unset limits default to 60 turns.",
 			"Include all required background and constraints explicitly in each task prompt; worker history is not inherited.",
 			"Use separate tasks only for work that can safely proceed in independent Git worktrees.",
 		],

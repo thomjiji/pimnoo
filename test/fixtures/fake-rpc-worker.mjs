@@ -17,6 +17,7 @@ let steeredText = null;
 let steerRun = null;
 let abortRun = null;
 let messageCount = 0;
+let currentSteerQueues = false;
 
 function log(entry) {
 	if (logPath) appendFileSync(logPath, `${JSON.stringify({ pid: process.pid, ...entry })}\n`);
@@ -46,16 +47,33 @@ function appendSession(entry) {
  * Behavior directives parsed from task prompts and follow-up messages.
  * Each directive is a line of the form `@fake:name [value]`:
  * - `@fake:settle <text>`  final report text for this run (default "fake final report")
- * - `@fake:delay <ms>`     wait before settling
- * - `@fake:hold`           keep the run active until a steer or abort arrives
- * - `@fake:abort`          end the run with an aborted stop reason
- * - `@fake:malformed`      emit one malformed JSON line at run start
- * - `@fake:stderr <text>`  write text to stderr at run start
- * - `@fake:exit <code>`    exit the process after the run settles
+ * - `@fake:empty-report`     settle without any final report text
+ * - `@fake:delay <ms>`       wait before settling
+ * - `@fake:hold`             keep the run active until a steer or abort arrives
+ * - `@fake:steer-queues`      steering does not end a held run; it stays queued
+ * - `@fake:turns <n>`        emit n turn_start events for this run (default 1)
+ * - `@fake:abort`            end the run with an aborted stop reason
+ * - `@fake:provider-error`   emit a failed auto-retry event at run start
+ * - `@fake:malformed`        emit one malformed JSON line at run start
+ * - `@fake:stderr <text>`    write text to stderr at run start
+ * - `@fake:exit <code>`      exit the process after the run settles
  * - `@fake:exit-startup <code>`  exit before responding to the prompt command
  */
 function parseDirectives(message) {
-	const directives = { settleText: null, delayMs: 0, hold: false, abort: false, malformed: false, stderr: null, exitCode: undefined, exitStartupCode: undefined };
+	const directives = {
+		settleText: null,
+		emptyReport: false,
+		delayMs: 0,
+		hold: false,
+		steerQueues: false,
+		turns: 1,
+		abort: false,
+		providerError: false,
+		malformed: false,
+		stderr: null,
+		exitCode: undefined,
+		exitStartupCode: undefined,
+	};
 	for (const line of String(message).split("\n")) {
 		const match = line.match(/^@fake:(\S+)(?:\s+(.*))?$/);
 		if (!match) continue;
@@ -64,14 +82,26 @@ function parseDirectives(message) {
 			case "settle":
 				directives.settleText = value;
 				break;
+			case "empty-report":
+				directives.emptyReport = true;
+				break;
 			case "delay":
 				directives.delayMs = Number(value) || 0;
 				break;
 			case "hold":
 				directives.hold = true;
 				break;
+			case "steer-queues":
+				directives.steerQueues = true;
+				break;
+			case "turns":
+				directives.turns = Number(value) || 1;
+				break;
 			case "abort":
 				directives.abort = true;
+				break;
+			case "provider-error":
+				directives.providerError = true;
 				break;
 			case "malformed":
 				directives.malformed = true;
@@ -101,8 +131,10 @@ async function runCycle(message) {
 	if (directives.malformed) process.stdout.write('{"type": "malformed", broken\n');
 	if (directives.stderr !== null) process.stderr.write(`${directives.stderr}\n`);
 	inRun = true;
+	currentSteerQueues = directives.steerQueues;
 	emit("agent_start");
-	emit("turn_start");
+	for (let i = 0; i < directives.turns; i += 1) emit("turn_start");
+	if (directives.providerError) emit("auto_retry_end", { success: false, attempt: 3, finalError: "529 overloaded_error" });
 	emit("queue_update", { steering: steeringQueue, followUp: followUpQueue });
 	const waitMs = directives.hold ? 60_000 : directives.delayMs;
 	if (waitMs > 0) {
@@ -118,9 +150,10 @@ async function runCycle(message) {
 		steerRun = null;
 	}
 	inRun = false;
+	currentSteerQueues = false;
 	const aborted = directives.abort || releaseKind === "abort";
 	const steered = releaseKind === "steer";
-	const text = aborted ? "" : steered ? steeredText : directives.settleText ?? "fake final report";
+	const text = aborted || directives.emptyReport ? "" : steered ? steeredText : directives.settleText ?? "fake final report";
 	releaseKind = null;
 	steeredText = null;
 	if (!aborted) lastFinalText = text;
@@ -215,7 +248,7 @@ process.stdin.on("data", (chunk) => {
 				respond(command);
 				steeringQueue.push(command.message);
 				emit("queue_update", { steering: steeringQueue, followUp: followUpQueue });
-				if (inRun && steerRun) {
+				if (inRun && steerRun && !currentSteerQueues) {
 					releaseKind = "steer";
 					steeredText = command.message;
 					steerRun();

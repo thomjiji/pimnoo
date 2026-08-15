@@ -22,18 +22,39 @@ export function isDelegateWorkerProcess(environment: Record<string, string | und
  * - starting: process spawned, startup handshake in progress.
  * - running: an agent run is active.
  * - waiting: agent settled but steering or follow-up messages are still queued.
+ * - wrapping up: the soft turn threshold was crossed and a wrap-up steering
+ *   message was sent; the worker is finishing within its grace period.
  * - completed: agent settled with no queued messages; the final report is available.
  * - failed: the worker died or its RPC stream became unusable.
  * - aborted: the active agent run was aborted; the worker is still alive.
  * - stopped: the parent terminated the worker process.
+ * - limit-reached: the hard turn limit was exceeded without settling; aborted.
+ * - timed-out: the task's total timeout elapsed; terminated.
  *
- * `completed`, `failed`, `aborted`, and `stopped` are terminal for `waitForTerminal`.
+ * `completed`, `failed`, `aborted`, `stopped`, `limit-reached`, and
+ * `timed-out` are terminal for `waitForTerminal`.
  */
-export type WorkerStatus = "starting" | "running" | "waiting" | "completed" | "failed" | "aborted" | "stopped";
+export type WorkerStatus =
+	| "starting"
+	| "running"
+	| "waiting"
+	| "wrapping up"
+	| "completed"
+	| "failed"
+	| "aborted"
+	| "stopped"
+	| "limit-reached"
+	| "timed-out";
 
-export const TERMINAL_WORKER_STATUSES: readonly WorkerStatus[] = ["completed", "failed", "aborted", "stopped"];
+export const TERMINAL_WORKER_STATUSES: readonly WorkerStatus[] = ["completed", "failed", "aborted", "stopped", "limit-reached", "timed-out"];
 
-const STICKY_STATUSES: readonly WorkerStatus[] = ["failed", "stopped"];
+const STICKY_STATUSES: readonly WorkerStatus[] = ["failed", "stopped", "limit-reached", "timed-out"];
+
+const DEFAULT_MAX_TURNS = 60;
+const DEFAULT_GRACE_MS = 30_000;
+
+const WRAP_UP_MESSAGE =
+	"Your turn budget is nearly exhausted. Stop exploring, finish your current work, and produce your final report now.";
 
 export interface WorkerTaskDefinition {
 	prompt: string;
@@ -41,6 +62,18 @@ export interface WorkerTaskDefinition {
 	role?: string;
 	model?: string;
 	thinkingLevel?: string;
+	/** Hard agent-loop turn limit. Defaults to 60. */
+	maxTurns?: number;
+	/** Soft turn threshold for the wrap-up steering message. Defaults to maxTurns - 2. */
+	softTurnThreshold?: number;
+	/** Total active runtime budget in milliseconds; timed out and terminated when exceeded. */
+	timeoutMs?: number;
+}
+
+interface ResolvedLimits {
+	maxTurns: number;
+	softThreshold: number;
+	timeoutMs?: number;
 }
 
 export interface StartWorkersRequest {
@@ -96,6 +129,8 @@ export interface WorkerSupervisorOptions {
 	piCommand?: PiCommand;
 	worktreeRoot?: string;
 	environment?: Record<string, string>;
+	/** Bounded grace period after the hard turn limit before a worker is aborted. Defaults to 30s. */
+	graceMs?: number;
 	/** Called after any worker state transition, for example to refresh TUI status surfaces. */
 	onStateChange?: () => void;
 }
@@ -105,16 +140,21 @@ interface PreparedWorktree {
 	taskId: string;
 	branch: string;
 	worktree: string;
+	limits: ResolvedLimits;
 }
 
 interface WorkerHandle {
 	state: WorkerTaskState;
 	process: WorkerProcessLike;
 	rpc: JsonlRpcClient;
+	limits: ResolvedLimits;
 	/** True between agent_settled and the supervisor's settle reconciliation. */
 	settling: boolean;
-	/** True when the settled run ended with an aborted stop reason. */
-	runAborted: boolean;
+	/** How the settled run ended: aborted or a provider/run error. */
+	pendingRunEnd?: "aborted" | "error";
+	wrapUpSent: boolean;
+	timeoutTimer?: ReturnType<typeof setTimeout>;
+	graceTimer?: ReturnType<typeof setTimeout>;
 }
 
 interface Waiter {
@@ -163,6 +203,7 @@ export class WorkerSupervisor {
 	private readonly piCommand: PiCommand;
 	private readonly worktreeRoot?: string;
 	private readonly environment: Record<string, string>;
+	private readonly graceMs: number;
 	private readonly onStateChange?: () => void;
 	private readonly workers = new Map<string, WorkerHandle>();
 	private readonly waiters = new Set<Waiter>();
@@ -173,6 +214,7 @@ export class WorkerSupervisor {
 		this.piCommand = options.piCommand ?? detectPiCommand();
 		this.worktreeRoot = options.worktreeRoot;
 		this.environment = options.environment ?? {};
+		this.graceMs = options.graceMs ?? DEFAULT_GRACE_MS;
 		this.onStateChange = options.onStateChange;
 	}
 
@@ -203,7 +245,7 @@ export class WorkerSupervisor {
 	async steer(taskId: string, message: string): Promise<WorkerTaskState> {
 		const worker = this.requireWorker(taskId);
 		if (typeof message !== "string" || !message.trim()) throw new WorkerSupervisorError("A steering message is required.");
-		if (worker.state.status !== "running") {
+		if (worker.state.status !== "running" && worker.state.status !== "wrapping up") {
 			throw new WorkerSupervisorError(`Worker ${taskId} is ${worker.state.status}, not running; use follow_up for a settled worker.`);
 		}
 		await worker.rpc.request({ type: "steer", message });
@@ -249,7 +291,22 @@ export class WorkerSupervisor {
 				signal?.removeEventListener("abort", onAbort);
 				resolve(states);
 			};
-			const onAbort = (): void => finish(snapshot());
+			const onAbort = (): void => {
+				// Parent cancellation propagates to the waited workers: terminate
+				// them (preserving sessions and worktrees) and report their states.
+				// Detach the waiter first so a settle racing with the stop cannot
+				// resolve it with a pre-stop status.
+				this.waiters.delete(waiter);
+				void (async () => {
+					for (const id of target) {
+						const worker = this.workers.get(id);
+						if (worker && !TERMINAL_WORKER_STATUSES.includes(worker.state.status)) {
+							await this.abortAndTerminate(worker, "stopped");
+						}
+					}
+					finish(snapshot());
+				})();
+			};
 			waiter.resolve = finish;
 			this.waiters.add(waiter);
 			signal?.addEventListener("abort", onAbort, { once: true });
@@ -262,18 +319,16 @@ export class WorkerSupervisor {
 	 */
 	async stop(taskId: string): Promise<WorkerTaskState> {
 		const worker = this.requireWorker(taskId);
-		if (!STICKY_STATUSES.includes(worker.state.status) && worker.state.status !== "stopped") {
-			if (worker.state.status === "starting" || worker.state.status === "running" || worker.state.status === "waiting" || worker.state.status === "aborted") {
-				try {
-					await worker.rpc.request({ type: "abort" });
-				} catch {
-					// The worker may already be gone; termination below still applies.
-				}
-				// Bounded grace so the aborted run can settle and be recorded in the session.
-				await waitForStatus(worker, ["aborted", "completed", "waiting", "failed"], 300);
-			}
+		const status = worker.state.status;
+		if (status === "stopped" || status === "failed" || status === "limit-reached" || status === "timed-out") {
+			return this.snapshot(worker); // The process is already gone or beyond saving.
+		}
+		if (status === "aborted" || status === "completed") {
+			// No active run; terminate the settled process directly.
 			this.transition(worker, "stopped");
 			await this.terminateWorker(worker);
+		} else {
+			await this.abortAndTerminate(worker, "stopped");
 		}
 		return this.snapshot(worker);
 	}
@@ -305,6 +360,7 @@ export class WorkerSupervisor {
 		if (worker.state.status === status) return;
 		if (STICKY_STATUSES.includes(worker.state.status)) return;
 		worker.state.status = status;
+		if (TERMINAL_WORKER_STATUSES.includes(status)) this.clearTimers(worker);
 		this.onStateChange?.();
 		this.resolveWaiters();
 	}
@@ -332,17 +388,18 @@ export class WorkerSupervisor {
 	}
 
 	private async prepareWorktrees(repository: { root: string; revision: string }, tasks: WorkerTaskDefinition[]): Promise<PreparedWorktree[]> {
+		const resolved = tasks.map((task) => ({ task, limits: resolveLimits(task) }));
 		const root = resolve(this.worktreeRoot ?? join(dirname(repository.root), `.${basename(repository.root)}-delegate-worktrees`));
 		await mkdir(root, { recursive: true });
 		const prepared: PreparedWorktree[] = [];
 		try {
-			for (const task of tasks) {
+			for (const { task, limits } of resolved) {
 				const taskId = `task-${randomUUID()}`;
 				const branch = `subagent/${taskId}`;
 				const worktree = join(root, taskId);
 				const result = await this.git.run(["worktree", "add", "-b", branch, worktree, repository.revision], repository.root);
 				if (result.exitCode !== 0) throw new GitCommandError(["worktree", "add", "-b", branch, worktree, repository.revision], result);
-				prepared.push({ task, taskId, branch, worktree });
+				prepared.push({ task, taskId, branch, worktree, limits });
 			}
 			return prepared;
 		} catch (error) {
@@ -389,7 +446,14 @@ export class WorkerSupervisor {
 			pendingSteering: 0,
 			pendingFollowUps: 0,
 		};
-		const handle: WorkerHandle = { state, process: child, rpc, settling: false, runAborted: false };
+		const handle: WorkerHandle = {
+			state,
+			process: child,
+			rpc,
+			limits: prepared.limits,
+			settling: false,
+			wrapUpSent: false,
+		};
 		this.wireWorkerEvents(handle);
 		try {
 			const newSession = await rpc.request({ type: "new_session", ...(request.parentSession ? { parentSession: request.parentSession } : {}) });
@@ -402,6 +466,11 @@ export class WorkerSupervisor {
 			await rpc.request({ type: "prompt", message: buildTaskPrompt(prepared.task) });
 			if (state.exitCode !== undefined) throw new RpcWorkerError("RPC worker exited before startup completed");
 			this.transition(handle, "running");
+			if (prepared.limits.timeoutMs) {
+				handle.timeoutTimer = setTimeout(() => {
+					void this.enforceTimeout(handle);
+				}, prepared.limits.timeoutMs);
+			}
 			return handle;
 		} catch (error) {
 			this.transition(handle, "failed");
@@ -417,7 +486,7 @@ export class WorkerSupervisor {
 			state.exitCode = code;
 			state.exitSignal = signal;
 			if (state.status === "starting") return; // The startup path decides the outcome.
-			if (state.status === "running" || state.status === "waiting" || state.status === "completed" || state.status === "aborted") {
+			if (state.status === "running" || state.status === "waiting" || state.status === "wrapping up" || state.status === "completed" || state.status === "aborted") {
 				this.transition(worker, code === 0 ? "completed" : "failed");
 				if (code !== 0) state.error = `RPC worker exited with code ${code}`;
 			}
@@ -438,12 +507,15 @@ export class WorkerSupervisor {
 					break;
 				case "agent_start":
 					worker.settling = false;
-					worker.runAborted = false;
+					worker.pendingRunEnd = undefined;
 					this.transition(worker, "running");
+					// Re-arm the hard-limit grace when a revived run is already past the limit.
+					this.checkTurnBudget(worker);
 					break;
 				case "turn_start":
 					state.turns += 1;
-					this.transition(worker, "running");
+					if (state.status === "starting" || state.status === "waiting") this.transition(worker, "running");
+					this.checkTurnBudget(worker);
 					break;
 				case "tool_execution_start":
 					state.lastTool = typeof event.toolName === "string" ? event.toolName : undefined;
@@ -467,10 +539,17 @@ export class WorkerSupervisor {
 					if (message?.role === "assistant") {
 						const text = assistantText(message.content);
 						if (text) state.finalText = text;
-						if (message.stopReason === "aborted") worker.runAborted = true;
+						if (message.stopReason === "aborted") worker.pendingRunEnd = "aborted";
+						else if (message.stopReason === "error") worker.pendingRunEnd = "error";
 					}
 					break;
 				}
+				case "auto_retry_end":
+					if (event.success === false) {
+						state.error = `Provider error: ${String(event.finalError ?? "retry attempts exhausted")}`;
+						this.transition(worker, "failed");
+					}
+					break;
 				case "agent_settled":
 					worker.settling = true;
 					void this.reconcileSettle(worker);
@@ -494,15 +573,79 @@ export class WorkerSupervisor {
 			const pending = Number(data.pendingMessageCount ?? 0) || 0;
 			const text = typeof textResponse.data?.text === "string" ? textResponse.data.text : "";
 			if (text) worker.state.finalText = text;
-			if (worker.runAborted) this.transition(worker, "aborted");
-			else if (pending > 0) this.transition(worker, "waiting");
-			else this.transition(worker, "completed");
+			if (worker.pendingRunEnd === "aborted") this.transition(worker, "aborted");
+			else if (worker.pendingRunEnd === "error") {
+				if (!worker.state.error) worker.state.error = "Run failed with an error stop reason";
+				this.transition(worker, "failed");
+			} else if (pending > 0 && !(worker.wrapUpSent && pending === 1 && text)) {
+				// A single queued message after we sent our own wrap-up steering is
+				// vestigial: the worker already settled with a final report, so the
+				// wrap-up instruction can no longer be delivered before a model call.
+				this.transition(worker, "waiting");
+			} else {
+				if (!worker.state.finalText) worker.state.error = "Completed without a final report";
+				this.transition(worker, "completed");
+			}
 		} catch {
 			// The worker died mid-query; the exit handler records the terminal state.
 		}
 	}
 
+	private checkTurnBudget(worker: WorkerHandle): void {
+		const { state } = worker;
+		if (state.turns >= worker.limits.softThreshold && !worker.wrapUpSent) {
+			worker.wrapUpSent = true;
+			void this.sendWrapUp(worker);
+			this.transition(worker, "wrapping up");
+		}
+		if (state.turns >= worker.limits.maxTurns && !worker.graceTimer) {
+			worker.graceTimer = setTimeout(() => {
+				void this.enforceHardLimit(worker);
+			}, this.graceMs);
+		}
+	}
+
+	private async sendWrapUp(worker: WorkerHandle): Promise<void> {
+		try {
+			await worker.rpc.request({ type: "steer", message: WRAP_UP_MESSAGE });
+		} catch {
+			// The worker may have died; the exit handler records the terminal state.
+		}
+	}
+
+	private async enforceHardLimit(worker: WorkerHandle): Promise<void> {
+		if (TERMINAL_WORKER_STATUSES.includes(worker.state.status)) return;
+		await this.abortAndTerminate(worker, "limit-reached", `Turn limit reached after ${worker.state.turns} turns`);
+	}
+
+	private async enforceTimeout(worker: WorkerHandle): Promise<void> {
+		if (TERMINAL_WORKER_STATUSES.includes(worker.state.status)) return;
+		await this.abortAndTerminate(worker, "timed-out", `Timed out after ${worker.limits.timeoutMs}ms`);
+	}
+
+	private async abortAndTerminate(worker: WorkerHandle, status: "stopped" | "limit-reached" | "timed-out", errorMessage?: string): Promise<void> {
+		if (TERMINAL_WORKER_STATUSES.includes(worker.state.status)) return;
+		try {
+			await worker.rpc.request({ type: "abort" });
+		} catch {
+			// The worker may already be gone; termination below still applies.
+		}
+		// Bounded grace so the aborted run can settle and be recorded in the session.
+		await waitForStatus(worker, ["aborted", "completed", "waiting", "failed"], 300);
+		if (errorMessage) worker.state.error = errorMessage;
+		this.transition(worker, status);
+		await this.terminateWorker(worker);
+	}
+
+	private clearTimers(worker: WorkerHandle): void {
+		if (worker.timeoutTimer) clearTimeout(worker.timeoutTimer);
+		if (worker.graceTimer) clearTimeout(worker.graceTimer);
+		worker.timeoutTimer = undefined;
+		worker.graceTimer = undefined;
+	}
+
 	private async terminateWorker(worker: WorkerHandle): Promise<void> {
+		this.clearTimers(worker);
 		worker.rpc.close();
 		try {
 			worker.process.stdin?.end();
@@ -534,7 +677,7 @@ export class WorkerSupervisor {
 }
 
 function isActive(status: WorkerStatus): boolean {
-	return status === "starting" || status === "running";
+	return status === "starting" || status === "running" || status === "wrapping up";
 }
 
 function countMessages(value: unknown): number {
@@ -559,6 +702,19 @@ function validateStartRequest(request: StartWorkersRequest): void {
 	for (const [index, task] of request.tasks.entries()) {
 		if (!task || typeof task.prompt !== "string" || !task.prompt.trim()) throw new WorkerSupervisorError(`Task ${index + 1} must include a non-empty prompt.`);
 	}
+}
+
+function resolveLimits(task: WorkerTaskDefinition): ResolvedLimits {
+	const maxTurns = task.maxTurns ?? DEFAULT_MAX_TURNS;
+	const softThreshold = task.softTurnThreshold ?? Math.max(1, maxTurns - 2);
+	if (!Number.isInteger(maxTurns) || maxTurns < 1) throw new WorkerSupervisorError("maxTurns must be a positive integer.");
+	if (!Number.isInteger(softThreshold) || softThreshold < 1 || softThreshold >= maxTurns) {
+		throw new WorkerSupervisorError("softTurnThreshold must be a positive integer below maxTurns.");
+	}
+	if (task.timeoutMs !== undefined && (!Number.isInteger(task.timeoutMs) || task.timeoutMs < 1)) {
+		throw new WorkerSupervisorError("timeoutMs must be a positive integer.");
+	}
+	return { maxTurns, softThreshold, timeoutMs: task.timeoutMs };
 }
 
 function detectPiCommand(): PiCommand {

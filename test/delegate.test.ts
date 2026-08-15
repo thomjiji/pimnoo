@@ -470,3 +470,190 @@ test("formats bounded, task-scoped tool results", () => {
 	assert.equal(statusSummaryText([]), undefined);
 	assert.equal(statusSummaryText([{ ...states[0] }]), undefined);
 });
+
+test("stop terminates a completed worker's process", async () => {
+	const harness = await createHarness();
+	try {
+		const [worker] = await startTasks(harness, [{ prompt: "Quick task." }]);
+		await until(() => harness.supervisor.status(worker.taskId)[0].status === "completed");
+		const state = await harness.supervisor.stop(worker.taskId);
+		assert.equal(state.status, "stopped");
+		await until(() => state.exitCode !== undefined);
+		assert.equal((await stat(worker.sessionFile)).isFile(), true);
+	} finally {
+		await cleanupHarness(harness);
+	}
+});
+
+test("sends a wrap-up steering message at the soft threshold and enters wrapping up", async () => {
+	const harness = await createHarness();
+	try {
+		const [worker] = await startTasks(harness, [{ prompt: "@fake:turns 2\n@fake:steer-queues\n@fake:hold\nWork.", maxTurns: 3, softTurnThreshold: 2 }]);
+		await until(() => harness.supervisor.status(worker.taskId)[0].status === "wrapping up");
+		const state = harness.supervisor.status(worker.taskId)[0];
+		assert.equal(state.turns, 2);
+		const log = await readLog(harness.logPath);
+		const steers = log.filter((entry) => entry.kind === "command" && entry.command.type === "steer");
+		assert.equal(steers.length, 1);
+		assert.match(steers[0].command.message, /final report/);
+		const stopped = await harness.supervisor.stop(worker.taskId);
+		assert.equal(stopped.status, "stopped");
+	} finally {
+		await cleanupHarness(harness);
+	}
+});
+
+test("aborts at the hard turn limit after the grace period and records limit-reached", async () => {
+	const harness = await createHarness();
+	try {
+		const supervisor = new WorkerSupervisor({
+			worktreeRoot: join(harness.temporary, "worktrees-hard"),
+			piCommand: { command: process.execPath, args: [fakeWorker] },
+			environment: { FAKE_RPC_LOG: harness.logPath },
+			graceMs: 200,
+		});
+		try {
+			const [worker] = await supervisor.start({
+				repositoryCwd: harness.repository,
+				parentSession: harness.parentSession,
+				sessionDir: harness.sessionDir,
+				tasks: [{ prompt: "@fake:turns 5\n@fake:steer-queues\n@fake:hold\nWork.", maxTurns: 3, softTurnThreshold: 2 }],
+			});
+			await until(() => supervisor.status(worker.taskId)[0].status === "limit-reached");
+			const state = supervisor.status(worker.taskId)[0];
+			assert.equal(state.turns, 5);
+			assert.match(state.error ?? "", /Turn limit reached after 5 turns/);
+			await until(() => state.exitCode !== undefined);
+			assert.equal((await stat(worker.sessionFile)).isFile(), true);
+			assert.equal((await stat(worker.worktree)).isDirectory(), true);
+		} finally {
+			await supervisor.dispose();
+		}
+	} finally {
+		await cleanupHarness(harness);
+	}
+});
+
+test("terminates a worker that exceeds its total timeout and marks it timed-out", async () => {
+	const harness = await createHarness();
+	try {
+		const [worker] = await startTasks(harness, [{ prompt: "@fake:hold\nWork.", timeoutMs: 200 }]);
+		await until(() => harness.supervisor.status(worker.taskId)[0].status === "timed-out");
+		const state = harness.supervisor.status(worker.taskId)[0];
+		assert.match(state.error ?? "", /Timed out after 200ms/);
+		await until(() => state.exitCode !== undefined);
+		assert.equal((await stat(worker.sessionFile)).isFile(), true);
+	} finally {
+		await cleanupHarness(harness);
+	}
+});
+
+test("parent cancellation of a wait stops the waited workers but not others", async () => {
+	const harness = await createHarness();
+	try {
+		const [alpha, beta] = await startTasks(harness, [
+			{ prompt: "@fake:hold\nAlpha work." },
+			{ prompt: "@fake:hold\nBeta work." },
+		]);
+		await until(() => harness.supervisor.status(alpha.taskId)[0].status === "running");
+		await until(() => harness.supervisor.status(beta.taskId)[0].status === "running");
+		const controller = new AbortController();
+		const waiting = harness.supervisor.waitForTerminal([alpha.taskId], controller.signal);
+		controller.abort();
+		const states = await waiting;
+		assert.equal(states.length, 1);
+		assert.equal(states[0].status, "stopped");
+		assert.equal(harness.supervisor.status(beta.taskId)[0].status, "running");
+	} finally {
+		await cleanupHarness(harness);
+	}
+});
+
+test("classifies provider errors as failed with the provider message", async () => {
+	const harness = await createHarness();
+	try {
+		const [worker] = await startTasks(harness, [{ prompt: "@fake:provider-error\nWork." }]);
+		const states = await harness.supervisor.waitForTerminal([worker.taskId]);
+		assert.equal(states[0].status, "failed");
+		assert.match(states[0].error ?? "", /Provider error: .*overloaded_error/);
+	} finally {
+		await cleanupHarness(harness);
+	}
+});
+
+test("flags a completed worker without a final report", async () => {
+	const harness = await createHarness();
+	try {
+		const [worker] = await startTasks(harness, [{ prompt: "@fake:empty-report\nWork." }]);
+		const states = await harness.supervisor.waitForTerminal([worker.taskId]);
+		assert.equal(states[0].status, "completed");
+		assert.match(states[0].error ?? "", /without a final report/);
+	} finally {
+		await cleanupHarness(harness);
+	}
+});
+
+test("captures stderr as diagnostics without failing the worker", async () => {
+	const harness = await createHarness();
+	try {
+		const [worker] = await startTasks(harness, [{ prompt: "@fake:stderr warning: disk almost full\nWork." }]);
+		const states = await harness.supervisor.waitForTerminal([worker.taskId]);
+		assert.equal(states[0].status, "completed");
+		assert.equal(states[0].error, undefined);
+		assert.match(states[0].diagnostics ?? "", /warning: disk almost full/);
+	} finally {
+		await cleanupHarness(harness);
+	}
+});
+
+test("validates turn limits before creating any worktree", async () => {
+	const harness = await createHarness();
+	try {
+		await assert.rejects(
+			startTasks(harness, [{ prompt: "Work.", maxTurns: 0 }]),
+			/maxTurns must be a positive integer/,
+		);
+		await assert.rejects(
+			startTasks(harness, [{ prompt: "Work.", maxTurns: 3, softTurnThreshold: 3 }]),
+			/softTurnThreshold must be a positive integer below maxTurns/,
+		);
+		await assert.rejects(
+			startTasks(harness, [{ prompt: "Work.", timeoutMs: -5 }]),
+			/timeoutMs must be a positive integer/,
+		);
+		const worktrees = (await git(harness.repository, "worktree", "list", "--porcelain")).stdout;
+		assert.equal(worktrees.split("worktree ").length, 2);
+	} finally {
+		await cleanupHarness(harness);
+	}
+});
+
+test("re-arms the hard-limit grace when a revived worker is already past the limit", async () => {
+	const harness = await createHarness();
+	try {
+		const supervisor = new WorkerSupervisor({
+			worktreeRoot: join(harness.temporary, "worktrees-rearm"),
+			piCommand: { command: process.execPath, args: [fakeWorker] },
+			environment: { FAKE_RPC_LOG: harness.logPath },
+			graceMs: 200,
+		});
+		try {
+			const [worker] = await supervisor.start({
+				repositoryCwd: harness.repository,
+				parentSession: harness.parentSession,
+				sessionDir: harness.sessionDir,
+				tasks: [{ prompt: "@fake:turns 4\nWork.", maxTurns: 3, softTurnThreshold: 2 }],
+			});
+			await until(() => supervisor.status(worker.taskId)[0].status === "completed");
+			await supervisor.followUp(worker.taskId, "@fake:hold\nKeep going.");
+			await until(() => supervisor.status(worker.taskId)[0].status === "limit-reached");
+			const state = supervisor.status(worker.taskId)[0];
+			assert.match(state.error ?? "", /Turn limit reached after/);
+			assert.equal((await stat(worker.sessionFile)).isFile(), true);
+		} finally {
+			await supervisor.dispose();
+		}
+	} finally {
+		await cleanupHarness(harness);
+	}
+});
