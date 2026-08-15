@@ -25,7 +25,7 @@
 - `wait`：等待一个或一组 worker（`taskIds`，默认全部）到达终态并取回与 task ID 关联的最终报告；父会话按 Escape 取消等待。
 - `stop`：中止并终止指定 worker，保留其 session 和 worktree 供检查。
 
-每个 worker 使用独立的 Git worktree 和持久 RPC session，完成后不会自动合并、提交或删除 worktree。状态机区分 `starting`、`running`、`waiting`、`completed`、`failed`、`aborted` 和 `stopped`；主 TUI 的状态栏会以单行汇总显示各 worker 数量。
+每个 worker 使用独立的 Git worktree 和持久 RPC session，完成后不会自动合并、提交或删除 worktree。状态机区分 `starting`、`running`、`waiting`、`completed`、`failed`、`aborted` 和 `stopped`；主 TUI 的状态栏只在有活跃 worker 时显示单行汇总，全部结束后自动清除。
 
 ## 安全和信任
 

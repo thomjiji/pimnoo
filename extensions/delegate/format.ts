@@ -56,11 +56,17 @@ export function formatStopText(state: WorkerTaskState): string {
 
 const SUMMARY_ORDER: readonly WorkerStatus[] = ["starting", "running", "waiting", "completed", "failed", "aborted", "stopped"];
 
-export function statusSummaryText(states: WorkerTaskState[]): string {
-	if (states.length === 0) return "delegate: no active workers";
+/**
+ * One-line footer summary for active workers only. Returns undefined when
+ * every worker is terminal or settled, so the caller clears the status entry
+ * instead of leaving stale history in the status bar.
+ */
+export function statusSummaryText(states: WorkerTaskState[]): string | undefined {
+	const active = states.filter((state) => state.status === "starting" || state.status === "running" || state.status === "waiting");
+	if (active.length === 0) return undefined;
 	const counts = new Map<WorkerStatus, number>();
-	for (const state of states) counts.set(state.status, (counts.get(state.status) ?? 0) + 1);
-	const parts = [`${states.length} worker${states.length === 1 ? "" : "s"}`];
+	for (const state of active) counts.set(state.status, (counts.get(state.status) ?? 0) + 1);
+	const parts = [`${active.length} worker${active.length === 1 ? "" : "s"}`];
 	for (const status of SUMMARY_ORDER) {
 		const count = counts.get(status);
 		if (count) parts.push(`${count} ${status}`);

@@ -466,6 +466,7 @@ test("formats bounded, task-scoped tool results", () => {
 	assert.equal(report.includes("x".repeat(2001)), false);
 
 	const summary = statusSummaryText(states);
-	assert.match(summary, /^delegate: 2 workers, 1 running, 1 completed$/);
-	assert.equal(statusSummaryText([]), "delegate: no active workers");
+	assert.equal(summary, "delegate: 1 worker, 1 running");
+	assert.equal(statusSummaryText([]), undefined);
+	assert.equal(statusSummaryText([{ ...states[0] }]), undefined);
 });
