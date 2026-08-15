@@ -151,13 +151,17 @@ async function runCycle(message) {
 	}
 	inRun = false;
 	currentSteerQueues = false;
-	const aborted = directives.abort || releaseKind === "abort";
+	const rpcAborted = releaseKind === "abort";
 	const steered = releaseKind === "steer";
+	const aborted = directives.abort || rpcAborted;
 	const text = aborted || directives.emptyReport ? "" : steered ? steeredText : directives.settleText ?? "fake final report";
 	releaseKind = null;
 	steeredText = null;
 	if (!aborted) lastFinalText = text;
-	emit("message_end", { message: { role: "assistant", content: [{ type: "text", text }], stopReason: aborted ? "aborted" : "stop" } });
+	// Real Pi reports an RPC-aborted run with an error stop reason; the
+	// @fake:abort directive models an organic abort instead.
+	const stopReason = directives.abort ? "aborted" : rpcAborted ? "error" : "stop";
+	emit("message_end", { message: { role: "assistant", content: [{ type: "text", text }], stopReason } });
 	emit("turn_end", { message: { role: "assistant" }, toolResults: [] });
 	emit("agent_settled");
 	if (steered) {

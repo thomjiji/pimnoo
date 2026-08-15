@@ -303,7 +303,8 @@ test("stop terminates the worker but preserves its session file and worktree", a
 		await until(() => harness.supervisor.status(worker.taskId)[0].status === "running");
 		const state = await harness.supervisor.stop(worker.taskId);
 		assert.equal(state.status, "stopped");
-		await until(() => state.exitCode !== undefined);
+		// The snapshot does not update after the process exits; poll the live state.
+		await until(() => harness.supervisor.status(worker.taskId)[0].exitCode !== undefined);
 
 		assert.equal((await stat(worker.sessionFile)).isFile(), true);
 		assert.equal((await stat(worker.worktree)).isDirectory(), true);
@@ -478,7 +479,7 @@ test("stop terminates a completed worker's process", async () => {
 		await until(() => harness.supervisor.status(worker.taskId)[0].status === "completed");
 		const state = await harness.supervisor.stop(worker.taskId);
 		assert.equal(state.status, "stopped");
-		await until(() => state.exitCode !== undefined);
+		await until(() => harness.supervisor.status(worker.taskId)[0].exitCode !== undefined);
 		assert.equal((await stat(worker.sessionFile)).isFile(), true);
 	} finally {
 		await cleanupHarness(harness);
@@ -523,7 +524,7 @@ test("aborts at the hard turn limit after the grace period and records limit-rea
 			const state = supervisor.status(worker.taskId)[0];
 			assert.equal(state.turns, 5);
 			assert.match(state.error ?? "", /Turn limit reached after 5 turns/);
-			await until(() => state.exitCode !== undefined);
+			await until(() => supervisor.status(worker.taskId)[0].exitCode !== undefined);
 			assert.equal((await stat(worker.sessionFile)).isFile(), true);
 			assert.equal((await stat(worker.worktree)).isDirectory(), true);
 		} finally {
@@ -541,7 +542,7 @@ test("terminates a worker that exceeds its total timeout and marks it timed-out"
 		await until(() => harness.supervisor.status(worker.taskId)[0].status === "timed-out");
 		const state = harness.supervisor.status(worker.taskId)[0];
 		assert.match(state.error ?? "", /Timed out after 200ms/);
-		await until(() => state.exitCode !== undefined);
+		await until(() => harness.supervisor.status(worker.taskId)[0].exitCode !== undefined);
 		assert.equal((await stat(worker.sessionFile)).isFile(), true);
 	} finally {
 		await cleanupHarness(harness);

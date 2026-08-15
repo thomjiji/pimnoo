@@ -153,6 +153,8 @@ interface WorkerHandle {
 	/** How the settled run ended: aborted or a provider/run error. */
 	pendingRunEnd?: "aborted" | "error";
 	wrapUpSent: boolean;
+	/** True while an abort/terminate path owns the worker's final state. */
+	terminating: boolean;
 	timeoutTimer?: ReturnType<typeof setTimeout>;
 	graceTimer?: ReturnType<typeof setTimeout>;
 }
@@ -367,9 +369,11 @@ export class WorkerSupervisor {
 
 	private resolveWaiters(): void {
 		for (const waiter of [...this.waiters]) {
-			const states = [...this.workers.values()]
-				.filter((worker) => waiter.taskIds.has(worker.state.taskId))
-				.map((worker) => this.snapshot(worker));
+			const targets = [...this.workers.values()].filter((worker) => waiter.taskIds.has(worker.state.taskId));
+			// Workers mid-termination report their final state from the
+			// abort/terminate path, not from settle reconciliation.
+			if (targets.some((worker) => worker.terminating)) continue;
+			const states = targets.map((worker) => this.snapshot(worker));
 			if (states.every((state) => TERMINAL_WORKER_STATUSES.includes(state.status))) waiter.resolve(states);
 		}
 	}
@@ -453,6 +457,7 @@ export class WorkerSupervisor {
 			limits: prepared.limits,
 			settling: false,
 			wrapUpSent: false,
+			terminating: false,
 		};
 		this.wireWorkerEvents(handle);
 		try {
@@ -569,6 +574,7 @@ export class WorkerSupervisor {
 			]);
 			if (!worker.settling) return; // A new run started while we were querying.
 			worker.settling = false;
+			if (worker.terminating) return; // The abort/terminate path owns the final state.
 			const data = stateResponse.data ?? {};
 			const pending = Number(data.pendingMessageCount ?? 0) || 0;
 			const text = typeof textResponse.data?.text === "string" ? textResponse.data.text : "";
@@ -625,6 +631,10 @@ export class WorkerSupervisor {
 
 	private async abortAndTerminate(worker: WorkerHandle, status: "stopped" | "limit-reached" | "timed-out", errorMessage?: string): Promise<void> {
 		if (TERMINAL_WORKER_STATUSES.includes(worker.state.status)) return;
+		// Claim the final state before sending abort: the aborted run settles
+		// with an error stop reason in real Pi, and settle reconciliation must
+		// not classify it as a plain failure while we are terminating.
+		worker.terminating = true;
 		try {
 			await worker.rpc.request({ type: "abort" });
 		} catch {
@@ -633,7 +643,13 @@ export class WorkerSupervisor {
 		// Bounded grace so the aborted run can settle and be recorded in the session.
 		await waitForStatus(worker, ["aborted", "completed", "waiting", "failed"], 300);
 		if (errorMessage) worker.state.error = errorMessage;
-		this.transition(worker, status);
+		// Parent-initiated termination is authoritative; bypass the sticky guard
+		// in case settle reconciliation already classified the aborted run.
+		worker.state.status = status;
+		worker.terminating = false;
+		this.clearTimers(worker);
+		this.onStateChange?.();
+		this.resolveWaiters();
 		await this.terminateWorker(worker);
 	}
 
