@@ -12,7 +12,6 @@
 | `export-md` | `extensions/export-md/index.ts` | 通过 `/export-md` 导出只包含提示和回复的 Markdown |
 | `no-italic` | `extensions/no-italic/index.ts` | 禁用 TUI 的 italic 显示样式 |
 | `reply-anchor` | `extensions/reply-anchor/index.ts` | 在 agent 回复开头添加可搜索的 `§` 锚点 |
-| `whimsical` | `extensions/whimsical/index.ts` | 每次 turn 开始时随机显示一句俏皮的英文提示语，结束时恢复默认 |
 
 `bash-readable/format.ts` 是 package 内部 helper，不是 Pi extension。根目录的 `package.json` 通过 `pi.extensions` 声明 `./extensions`，Pi 的 package 目录发现规则只加载每个子目录的 `index.ts`，因此 helper 和测试不会被当成 extension 加载。
 
@@ -160,6 +159,4 @@ npm run test:smoke
 
 ## 目录和发布范围
 
-根 `package.json` 是 umbrella package 的唯一 manifest。`extensions/` 只包含七个运行时 extension 和 `bash-readable` 的内部 helper；`test/`、`scripts/` 和文档不在 `pi.extensions` 的资源范围内。初始版本不发布 npm、不添加第三方 runtime dependency、不创建 sibling package，也不提供会安装其他 package 的 `/setup` 命令。
-
-`whimsical` 集成自 mitsuhiko/agent-stuff 的 `extensions/whimsical.ts`（Apache-2.0），保留原版英文文案和行为。
+根 `package.json` 是 umbrella package 的唯一 manifest。`extensions/` 只包含六个运行时 extension 和 `bash-readable` 的内部 helper；`test/`、`scripts/` 和文档不在 `pi.extensions` 的资源范围内。初始版本不发布 npm、不添加第三方 runtime dependency、不创建 sibling package，也不提供会安装其他 package 的 `/setup` 命令。
