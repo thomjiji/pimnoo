@@ -8,6 +8,7 @@
   "type": "module",
   "files": [
     "README.md",
+    "LICENSES",
     "extensions",
     "package.json",
     "scripts",
