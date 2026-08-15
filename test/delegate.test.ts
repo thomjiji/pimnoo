@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { applyTaskLimits, isDelegateWorkerProcess, WorkerSupervisor } from "../extensions/delegate/supervisor.ts";
-import { fleetListLines, formatLogsText, formatProgressText, formatReportText, formatStatusText } from "../extensions/delegate/format.ts";
+import { fleetListLines, formatLogsText, formatProgressText, formatReportText, formatStatusText, workerReportText } from "../extensions/delegate/format.ts";
 
 const execFileAsync = promisify(execFile);
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -795,6 +795,25 @@ test("renders fleet list rows with selection and expansion", () => {
 	const windowed = fleetListLines(many);
 	assert.equal(windowed.length, 7);
 	assert.match(stripAnsi(windowed[windowed.length - 1]), /└─ ↓ 2 more/);
+});
+
+test("renders worker completion reports for the main transcript", () => {
+	const theme = { bold: (text: string) => `B(${text})`, fg: (name: string, text: string) => `${name}(${text})` };
+	const ok = workerReportText(
+		{ taskId: "task-a", sessionName: "subagent/a", status: "completed", turns: 3, elapsedMs: 65_000, finalText: "First line.\nSecond line.", sessionFile: "/sessions/a.jsonl" },
+		theme,
+	);
+	assert.match(ok, /success\(ok\) B\(subagent\/a\) dim\(completed\)/);
+	assert.match(ok, /dim\(turn 3 · 1m05s\)/);
+	assert.match(ok, /dim\(-> First line\.\)/);
+	assert.match(ok, /dim\(session: \/sessions\/a\.jsonl\)/);
+
+	const failed = workerReportText(
+		{ taskId: "task-b", sessionName: "subagent/b", status: "failed", turns: 1, elapsedMs: 2000, error: "RPC worker exited with code 3", sessionFile: "/sessions/b.jsonl" },
+		theme,
+	);
+	assert.match(failed, /error\(fail\) B\(subagent\/b\) dim\(failed\)/);
+	assert.match(failed, /error\(- RPC worker exited with code 3\)/);
 });
 
 test("fleet list renders themed widget lines, lingers finished workers, and clears on dispose", async () => {

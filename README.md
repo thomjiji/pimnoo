@@ -26,7 +26,7 @@
 - `stop`：中止并终止指定 worker，保留其 session 和 worktree 供检查。
 - `logs`：返回指定 worker 的有界最近活动（turn、工具调用与结果、assistant 文本），用于判断它当前在做什么。
 
-`delegate wait` 等待期间会周期性地把每个目标 worker 的进度行（状态、turn、当前工具与耗时、总耗时）流进主对话流；`delegate logs <taskId>` 可以拉取指定 worker 的最近活动。顶层 `maxTurns`、`softTurnThreshold`、`timeoutMs` 可以作为所有 task 的默认值，task 内的显式值优先。
+`delegate wait` 等待期间会周期性地把每个目标 worker 的进度行（状态、turn、当前工具与耗时、总耗时）流进主对话流；`delegate logs <taskId>` 可以拉取指定 worker 的最近活动。每个 worker 到达终态时，主会话流会自动追加一条完成报告（ok/fail、状态、耗时、最终文本预览和 session 路径）——它是显示型条目，不进入 LLM 上下文；完整最终文本仍由 `wait` 工具结果返回。顶层 `maxTurns`、`softTurnThreshold`、`timeoutMs` 可以作为所有 task 的默认值，task 内的显式值优先。
 
 有活跃 worker 时，输入框上方会常驻显示 worker 列表：白色醒目的 `delegate: N active workers` 标题行下，用 box-drawing 层级列出每个 worker 的灰色状态行（turn、当前工具与耗时、总耗时），每 200ms 刷新；最多显示 5 行，超出折叠为 `↓ N more`；worker 结束后其行会停留几秒再消失。列表是纯显示，不占用任何按键。
 

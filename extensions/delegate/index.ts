@@ -156,6 +156,7 @@ export default function (pi: ExtensionAPI) {
 			try {
 				const result = await runAction(params as unknown as DelegateParameters, signal ?? undefined, onUpdate, ctx);
 				refreshSurfaces(ctx);
+				reportTerminalWorkers();
 				return {
 					content: [{ type: "text", text: result.text }],
 					details: { action: params.action, tasks: result.tasks },

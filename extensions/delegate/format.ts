@@ -64,6 +64,44 @@ function formatDuration(ms: number): string {
 }
 
 /** One progress line per worker, used for live wait progress in the transcript. */
+export interface WorkerReportEntry {
+	taskId: string;
+	sessionName: string;
+	status: WorkerStatus;
+	turns: number;
+	elapsedMs?: number;
+	finalText?: string;
+	error?: string;
+	sessionFile: string;
+}
+
+export interface ReportTheme {
+	bold(text: string): string;
+	fg(name: string, text: string): string;
+}
+
+/**
+ * Text for the completion entry appended to the main transcript when a
+ * worker reaches a terminal state. Display-only: custom entries do not
+ * participate in LLM context.
+ */
+export function workerReportText(entry: WorkerReportEntry, theme: ReportTheme): string {
+	const failed = ["failed", "aborted", "stopped", "limit-reached", "timed-out"].includes(entry.status);
+	const icon = failed ? theme.fg("error", "fail") : theme.fg("success", "ok");
+	const lines = [`${icon} ${theme.bold(entry.sessionName)} ${theme.fg("dim", entry.status)}`];
+	const stats: string[] = [];
+	if (entry.turns > 0) stats.push(`turn ${entry.turns}`);
+	if (entry.elapsedMs !== undefined) stats.push(formatDuration(entry.elapsedMs));
+	if (stats.length > 0) lines.push(`  ${theme.fg("dim", stats.join(" · "))}`);
+	if (entry.finalText) {
+		const first = entry.finalText.split("\n")[0]?.slice(0, 160) ?? "";
+		lines.push(`  ${theme.fg("dim", `-> ${first}`)}`);
+	}
+	if (entry.error) lines.push(`  ${theme.fg("error", `- ${entry.error}`)}`);
+	lines.push(`  ${theme.fg("dim", `session: ${entry.sessionFile}`)}`);
+	return lines.join("\n");
+}
+
 export function formatProgressText(states: WorkerTaskState[]): string {
 	return states
 		.map((state) => {
