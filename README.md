@@ -24,6 +24,9 @@
 - `status`：查询单个 worker（`taskId`）或全部 worker 的状态。
 - `wait`：等待一个或一组 worker（`taskIds`，默认全部）到达终态并取回与 task ID 关联的最终报告；父会话按 Escape 取消等待。
 - `stop`：中止并终止指定 worker，保留其 session 和 worktree 供检查。
+- `logs`：返回指定 worker 的有界最近活动（turn、工具调用与结果、assistant 文本），用于判断它当前在做什么。
+
+`delegate wait` 等待期间会周期性地把每个目标 worker 的进度行（状态、turn、当前工具与耗时、总耗时）流进主对话流；有活跃 worker 时，编辑器上方会显示紧凑的实时面板，全部结束后自动清除。顶层 `maxTurns`、`softTurnThreshold`、`timeoutMs` 可以作为所有 task 的默认值，task 内的显式值优先。
 
 每个 worker 使用独立的 Git worktree 和持久 RPC session，完成后不会自动合并、提交或删除 worktree。每个 task 可选配置 `maxTurns`（默认 60）、`softTurnThreshold`（默认 `maxTurns - 2`）和 `timeoutMs`（默认不设）：达到软阈值会收到收尾 steering 并进入 `wrapping up`；硬限制后宽限期内未 settle 会被 abort 并标记 `limit-reached`；总超时终止并标记 `timed-out`。返回给主 Pi 的最终文本有 2000 字符上限，完整对话仍保存在 worker session JSONL 中。
 

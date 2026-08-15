@@ -18,6 +18,7 @@ let steerRun = null;
 let abortRun = null;
 let messageCount = 0;
 let currentSteerQueues = false;
+let currentHangAbort = false;
 
 function log(entry) {
 	if (logPath) appendFileSync(logPath, `${JSON.stringify({ pid: process.pid, ...entry })}\n`);
@@ -51,6 +52,7 @@ function appendSession(entry) {
  * - `@fake:delay <ms>`       wait before settling
  * - `@fake:hold`             keep the run active until a steer or abort arrives
  * - `@fake:steer-queues`      steering does not end a held run; it stays queued
+ * - `@fake:hang-abort`        ignore the abort command entirely (no response, no release)
  * - `@fake:turns <n>`        emit n turn_start events for this run (default 1)
  * - `@fake:abort`            end the run with an aborted stop reason
  * - `@fake:provider-error`   emit a failed auto-retry event at run start
@@ -66,6 +68,7 @@ function parseDirectives(message) {
 		delayMs: 0,
 		hold: false,
 		steerQueues: false,
+		hangAbort: false,
 		turns: 1,
 		abort: false,
 		providerError: false,
@@ -93,6 +96,9 @@ function parseDirectives(message) {
 				break;
 			case "steer-queues":
 				directives.steerQueues = true;
+				break;
+			case "hang-abort":
+				directives.hangAbort = true;
 				break;
 			case "turns":
 				directives.turns = Number(value) || 1;
@@ -132,6 +138,7 @@ async function runCycle(message) {
 	if (directives.stderr !== null) process.stderr.write(`${directives.stderr}\n`);
 	inRun = true;
 	currentSteerQueues = directives.steerQueues;
+	currentHangAbort = directives.hangAbort;
 	emit("agent_start");
 	for (let i = 0; i < directives.turns; i += 1) emit("turn_start");
 	if (directives.providerError) emit("auto_retry_end", { success: false, attempt: 3, finalError: "529 overloaded_error" });
@@ -151,6 +158,7 @@ async function runCycle(message) {
 	}
 	inRun = false;
 	currentSteerQueues = false;
+	currentHangAbort = false;
 	const rpcAborted = releaseKind === "abort";
 	const steered = releaseKind === "steer";
 	const aborted = directives.abort || rpcAborted;
@@ -269,6 +277,7 @@ process.stdin.on("data", (chunk) => {
 				}
 				break;
 			case "abort":
+				if (currentHangAbort) break; // Model a worker stuck in a model call: no response, no release.
 				respond(command);
 				if (inRun && abortRun) {
 					releaseKind = "abort";

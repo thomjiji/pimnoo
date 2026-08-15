@@ -1,7 +1,7 @@
 import { Type } from "typebox";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { isDelegateWorkerProcess, WorkerSupervisor } from "./supervisor.ts";
-import { formatReportText, formatStartText, formatStatusText, formatStopText, statusSummaryText } from "./format.ts";
+import { applyTaskLimits, isDelegateWorkerProcess, TERMINAL_WORKER_STATUSES, WorkerSupervisor } from "./supervisor.ts";
+import { formatLogsText, formatProgressText, formatReportText, formatStartText, formatStatusText, formatStopText, statusSummaryText, widgetLines } from "./format.ts";
 import type { WorkerTaskState } from "./supervisor.ts";
 
 const workerTaskSchema = Type.Object({
@@ -16,11 +16,23 @@ const workerTaskSchema = Type.Object({
 });
 
 interface DelegateParameters {
-	action: "start" | "steer" | "follow_up" | "status" | "wait" | "stop";
-	tasks?: Array<{ prompt: string; name?: string; role?: string; model?: string; thinkingLevel?: string }>;
+	action: "start" | "steer" | "follow_up" | "status" | "wait" | "stop" | "logs";
+	tasks?: Array<{
+		prompt: string;
+		name?: string;
+		role?: string;
+		model?: string;
+		thinkingLevel?: string;
+		maxTurns?: number;
+		softTurnThreshold?: number;
+		timeoutMs?: number;
+	}>;
 	taskId?: string;
 	taskIds?: string[];
 	message?: string;
+	maxTurns?: number;
+	softTurnThreshold?: number;
+	timeoutMs?: number;
 }
 
 function modelName(ctx: ExtensionContext): string | undefined {
@@ -35,36 +47,49 @@ function requireString(value: unknown, action: string, field: string): string {
 
 interface UiStatusSink {
 	setStatus(key: string, text: string | undefined): void;
+	setWidget(key: string, lines: string[] | undefined): void;
 }
 
 export default function (pi: ExtensionAPI) {
 	if (isDelegateWorkerProcess()) return;
 
 	let lastUi: UiStatusSink | undefined;
+	let surfaceTimer: ReturnType<typeof setInterval> | undefined;
 	const supervisor = new WorkerSupervisor({
-		onStateChange: () => {
-			if (!lastUi) return;
-			try {
-				lastUi.setStatus("delegate", statusSummaryText(supervisor.list()));
-			} catch {
-				// Status surfaces are best effort; never break the supervisor for them.
-			}
-		},
+		onStateChange: () => refreshSurfaces(),
 	});
 
-	function refreshStatus(ctx: ExtensionContext): void {
-		lastUi = ctx.ui;
+	function refreshSurfaces(ctx?: ExtensionContext): void {
+		if (ctx) lastUi = ctx.ui;
+		if (!lastUi) return;
+		const states = supervisor.list();
 		try {
-			ctx.ui.setStatus("delegate", statusSummaryText(supervisor.list()));
+			lastUi.setStatus("delegate", statusSummaryText(states));
+			lastUi.setWidget("delegate", widgetLines(states));
 		} catch {
-			// Best effort, as above.
+			// Status surfaces are best effort; never break the supervisor for them.
+		}
+		// While any worker is active, keep the widget fresh without waiting
+		// for the next transition, so tool durations and turns stay current.
+		if (states.some((state) => !TERMINAL_WORKER_STATUSES.includes(state.status))) {
+			if (!surfaceTimer) {
+				surfaceTimer = setInterval(() => refreshSurfaces(), 2000);
+			}
+		} else if (surfaceTimer) {
+			clearInterval(surfaceTimer);
+			surfaceTimer = undefined;
 		}
 	}
 
-	async function runAction(params: DelegateParameters, signal: AbortSignal | undefined, ctx: ExtensionContext): Promise<{ text: string; tasks: WorkerTaskState[] }> {
+	async function runAction(
+		params: DelegateParameters,
+		signal: AbortSignal | undefined,
+		onUpdate: ((update: { content: Array<{ type: "text"; text: string }> }) => void) | undefined,
+		ctx: ExtensionContext,
+	): Promise<{ text: string; tasks: WorkerTaskState[] }> {
 		switch (params.action) {
 			case "start": {
-				const tasks = params.tasks ?? [];
+				const tasks = applyTaskLimits(params.tasks ?? [], params);
 				const started = await supervisor.start({
 					repositoryCwd: ctx.cwd,
 					sessionDir: ctx.sessionManager.getSessionDir(),
@@ -92,7 +117,9 @@ export default function (pi: ExtensionAPI) {
 				return { text: formatStatusText(states), tasks: states };
 			}
 			case "wait": {
-				const states = await supervisor.waitForTerminal(params.taskIds, signal);
+				const states = await supervisor.waitForTerminal(params.taskIds, signal, (progress) => {
+					onUpdate?.({ content: [{ type: "text", text: formatProgressText(progress) }] });
+				});
 				const cancelled = signal?.aborted === true;
 				return {
 					text: `${cancelled ? "Wait cancelled by parent; current states:\n" : ""}${formatReportText(states)}`,
@@ -103,6 +130,11 @@ export default function (pi: ExtensionAPI) {
 				const taskId = requireString(params.taskId, "stop", "taskId");
 				const state = await supervisor.stop(taskId);
 				return { text: formatStopText(state), tasks: [state] };
+			}
+			case "logs": {
+				const taskId = requireString(params.taskId, "logs", "taskId");
+				const state = supervisor.status(taskId)[0];
+				return { text: formatLogsText(state), tasks: [state] };
 			}
 		}
 	}
@@ -115,29 +147,34 @@ export default function (pi: ExtensionAPI) {
 		promptSnippet: "Start, steer, wait for, or stop isolated headless worker tasks",
 		promptGuidelines: [
 			"Use delegate start to launch workers, delegate status to inspect them, and delegate wait to collect their final reports.",
+			"Use delegate logs to read a worker's recent activity when you need to know what it is doing right now.",
 			"Use delegate follow_up for messages that should wait until a worker settles; use delegate steer only while a worker is running.",
-			"Set maxTurns, softTurnThreshold, or timeoutMs per task to bound worker runtime; unset limits default to 60 turns.",
+			"When the current model is stuck, delegate a consultation worker with a stronger model and higher thinking level, and include the problem, attempts, and errors in the task prompt.",
+			"Set maxTurns, softTurnThreshold, or timeoutMs per task (or top-level as defaults) to bound worker runtime; unset limits default to 60 turns.",
 			"Include all required background and constraints explicitly in each task prompt; worker history is not inherited.",
 			"Use separate tasks only for work that can safely proceed in independent Git worktrees.",
 		],
 		parameters: Type.Object({
-			action: Type.Union([Type.Literal("start"), Type.Literal("steer"), Type.Literal("follow_up"), Type.Literal("status"), Type.Literal("wait"), Type.Literal("stop")]),
+			action: Type.Union([Type.Literal("start"), Type.Literal("steer"), Type.Literal("follow_up"), Type.Literal("status"), Type.Literal("wait"), Type.Literal("stop"), Type.Literal("logs")]),
 			tasks: Type.Optional(Type.Array(workerTaskSchema, { minItems: 1, description: "Worker tasks to start (start only)." })),
-			taskId: Type.Optional(Type.String({ description: "Target task ID (steer, follow_up, status, stop)." })),
+			taskId: Type.Optional(Type.String({ description: "Target task ID (steer, follow_up, status, stop, logs)." })),
 			taskIds: Type.Optional(Type.Array(Type.String(), { minItems: 1, description: "Task IDs to wait for (wait only; defaults to all workers)." })),
 			message: Type.Optional(Type.String({ description: "Message text (steer, follow_up)." })),
+			maxTurns: Type.Optional(Type.Integer({ minimum: 1, description: "Default hard turn limit for tasks that do not set their own (start only)." })),
+			softTurnThreshold: Type.Optional(Type.Integer({ minimum: 1, description: "Default soft turn threshold for tasks that do not set their own (start only)." })),
+			timeoutMs: Type.Optional(Type.Integer({ minimum: 1, description: "Default total runtime budget in milliseconds for tasks that do not set their own (start only)." })),
 		}),
-		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+		async execute(_toolCallId, params, signal, onUpdate, ctx) {
 			try {
-				const result = await runAction(params as unknown as DelegateParameters, signal ?? undefined, ctx);
-				refreshStatus(ctx);
+				const result = await runAction(params as unknown as DelegateParameters, signal ?? undefined, onUpdate, ctx);
+				refreshSurfaces(ctx);
 				return {
 					content: [{ type: "text", text: result.text }],
 					details: { action: params.action, tasks: result.tasks },
 				};
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
-				refreshStatus(ctx);
+				refreshSurfaces(ctx);
 				return {
 					content: [{ type: "text", text: `Unable to ${params.action} delegated workers: ${message}` }],
 					details: { action: params.action, error: message },
@@ -148,6 +185,14 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("session_shutdown", async () => {
+		if (surfaceTimer) clearInterval(surfaceTimer);
+		surfaceTimer = undefined;
+		try {
+			lastUi?.setWidget("delegate", undefined);
+			lastUi?.setStatus("delegate", undefined);
+		} catch {
+			// Best effort cleanup.
+		}
 		await supervisor.dispose();
 	});
 }

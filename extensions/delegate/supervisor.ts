@@ -52,6 +52,9 @@ const STICKY_STATUSES: readonly WorkerStatus[] = ["failed", "stopped", "limit-re
 
 const DEFAULT_MAX_TURNS = 60;
 const DEFAULT_GRACE_MS = 30_000;
+const ABORT_REQUEST_DEADLINE_MS = 2_000;
+const MAX_ACTIVITY_LINES = 30;
+const MAX_ACTIVITY_LINE_LENGTH = 160;
 
 const WRAP_UP_MESSAGE =
 	"Your turn budget is nearly exhausted. Stop exploring, finish your current work, and produce your final report now.";
@@ -68,6 +71,23 @@ export interface WorkerTaskDefinition {
 	softTurnThreshold?: number;
 	/** Total active runtime budget in milliseconds; timed out and terminated when exceeded. */
 	timeoutMs?: number;
+}
+
+interface TaskLimits {
+	maxTurns?: number;
+	softTurnThreshold?: number;
+	timeoutMs?: number;
+}
+
+/** Fill missing per-task limits from top-level defaults; explicit task values win. */
+export function applyTaskLimits<T extends TaskLimits>(tasks: T[], defaults: TaskLimits): T[] {
+	if (defaults.maxTurns === undefined && defaults.softTurnThreshold === undefined && defaults.timeoutMs === undefined) return tasks;
+	return tasks.map((task) => ({
+		...task,
+		maxTurns: task.maxTurns ?? defaults.maxTurns,
+		softTurnThreshold: task.softTurnThreshold ?? defaults.softTurnThreshold,
+		timeoutMs: task.timeoutMs ?? defaults.timeoutMs,
+	}));
 }
 
 interface ResolvedLimits {
@@ -106,6 +126,12 @@ export interface WorkerTaskState extends WorkerStartResult {
 	diagnostics?: string;
 	exitCode?: number | null;
 	exitSignal?: string | null;
+	/** Milliseconds since the worker process started. */
+	elapsedMs?: number;
+	/** Milliseconds the current tool has been running (0 when idle). */
+	toolElapsedMs?: number;
+	/** Bounded tail of recent activity lines, oldest first. */
+	activity?: string[];
 }
 
 export interface GitResult {
@@ -148,6 +174,9 @@ interface WorkerHandle {
 	process: WorkerProcessLike;
 	rpc: JsonlRpcClient;
 	limits: ResolvedLimits;
+	startedAt: number;
+	toolStartedAt?: number;
+	activity: string[];
 	/** True between agent_settled and the supervisor's settle reconciliation. */
 	settling: boolean;
 	/** How the settled run ended: aborted or a provider/run error. */
@@ -271,12 +300,19 @@ export class WorkerSupervisor {
 		return this.list();
 	}
 
+	/** Return the bounded recent-activity tail of one worker, oldest first. */
+	logs(taskId: string): string[] {
+		return [...this.requireWorker(taskId).activity];
+	}
+
 	/**
 	 * Wait until the given workers (all of them by default) reach a terminal
 	 * status, then return their final states. Resolves early with the current
-	 * states when the parent aborts the wait via `signal`.
+	 * states when the parent aborts the wait via `signal`. When `onProgress`
+	 * is given, it is called immediately and about once per second with the
+	 * current states while the wait is pending.
 	 */
-	waitForTerminal(taskIds?: string[], signal?: AbortSignal): Promise<WorkerTaskState[]> {
+	waitForTerminal(taskIds?: string[], signal?: AbortSignal, onProgress?: (states: WorkerTaskState[]) => void): Promise<WorkerTaskState[]> {
 		const target = taskIds ? new Set(taskIds) : new Set(this.workers.keys());
 		for (const id of target) {
 			if (!this.workers.has(id)) throw new WorkerSupervisorError(`No worker with task ID ${id}`);
@@ -286,9 +322,12 @@ export class WorkerSupervisor {
 		if (target.size === 0) return Promise.resolve([]);
 		if (signal?.aborted) return Promise.resolve(snapshot());
 		if (snapshot().every((state) => TERMINAL_WORKER_STATUSES.includes(state.status))) return Promise.resolve(snapshot());
+		const progressTimer = onProgress ? setInterval(() => onProgress(snapshot()), 1000) : undefined;
+		onProgress?.(snapshot());
 		return new Promise((resolve) => {
 			const waiter: Waiter = { taskIds: target, resolve: () => {} };
 			const finish = (states: WorkerTaskState[]): void => {
+				if (progressTimer) clearInterval(progressTimer);
 				this.waiters.delete(waiter);
 				signal?.removeEventListener("abort", onAbort);
 				resolve(states);
@@ -349,7 +388,13 @@ export class WorkerSupervisor {
 	}
 
 	private snapshot(worker: WorkerHandle): WorkerTaskState {
-		return { ...worker.state };
+		const now = Date.now();
+		return {
+			...worker.state,
+			elapsedMs: now - worker.startedAt,
+			toolElapsedMs: worker.toolStartedAt !== undefined && worker.state.lastTool ? now - worker.toolStartedAt : 0,
+			activity: [...worker.activity],
+		};
 	}
 
 	private requireWorker(taskId: string): WorkerHandle {
@@ -455,6 +500,8 @@ export class WorkerSupervisor {
 			process: child,
 			rpc,
 			limits: prepared.limits,
+			startedAt: Date.now(),
+			activity: [],
 			settling: false,
 			wrapUpSent: false,
 			terminating: false,
@@ -483,6 +530,11 @@ export class WorkerSupervisor {
 			await this.removeSessionFile(handle);
 			throw error;
 		}
+	}
+
+	private recordActivity(worker: WorkerHandle, line: string): void {
+		worker.activity.push(`${new Date().toISOString().slice(11, 19)} ${line.slice(0, MAX_ACTIVITY_LINE_LENGTH)}`);
+		if (worker.activity.length > MAX_ACTIVITY_LINES) worker.activity.splice(0, worker.activity.length - MAX_ACTIVITY_LINES);
 	}
 
 	private wireWorkerEvents(worker: WorkerHandle): void {
@@ -519,16 +571,24 @@ export class WorkerSupervisor {
 					break;
 				case "turn_start":
 					state.turns += 1;
+					this.recordActivity(worker, `turn ${state.turns} started`);
 					if (state.status === "starting" || state.status === "waiting") this.transition(worker, "running");
 					this.checkTurnBudget(worker);
 					break;
-				case "tool_execution_start":
+				case "tool_execution_start": {
 					state.lastTool = typeof event.toolName === "string" ? event.toolName : undefined;
+					worker.toolStartedAt = Date.now();
+					const args = truncateText(JSON.stringify(event.args ?? {}), MAX_ACTIVITY_LINE_LENGTH - 30);
+					this.recordActivity(worker, `tool ${state.lastTool ?? "?"} started: ${args}`);
 					this.transition(worker, "running");
 					break;
-				case "tool_execution_end":
+				}
+				case "tool_execution_end": {
+					this.recordActivity(worker, `tool ${state.lastTool ?? "?"} finished${event.isError ? " (error)" : ""}`);
+					worker.toolStartedAt = undefined;
 					state.lastTool = undefined;
 					break;
+				}
 				case "queue_update": {
 					state.pendingSteering = countMessages(event.steering);
 					state.pendingFollowUps = countMessages(event.followUp);
@@ -543,7 +603,10 @@ export class WorkerSupervisor {
 					const message = event.message as { role?: string; content?: unknown; stopReason?: string } | undefined;
 					if (message?.role === "assistant") {
 						const text = assistantText(message.content);
-						if (text) state.finalText = text;
+						if (text) {
+							state.finalText = text;
+							this.recordActivity(worker, `assistant: ${text}`);
+						}
 						if (message.stopReason === "aborted") worker.pendingRunEnd = "aborted";
 						else if (message.stopReason === "error") worker.pendingRunEnd = "error";
 					}
@@ -556,6 +619,7 @@ export class WorkerSupervisor {
 					}
 					break;
 				case "agent_settled":
+					this.recordActivity(worker, "run settled");
 					worker.settling = true;
 					void this.reconcileSettle(worker);
 					break;
@@ -635,11 +699,12 @@ export class WorkerSupervisor {
 		// with an error stop reason in real Pi, and settle reconciliation must
 		// not classify it as a plain failure while we are terminating.
 		worker.terminating = true;
-		try {
-			await worker.rpc.request({ type: "abort" });
-		} catch {
-			// The worker may already be gone; termination below still applies.
-		}
+		// Pi's abort awaits the agent becoming idle, so the response can hang
+		// while a model call is in flight. Bound the wait: after the deadline
+		// the process is terminated directly. The pending request is settled
+		// by rpc.close() during termination.
+		const abortResponse = worker.rpc.request({ type: "abort" }).catch(() => undefined);
+		await Promise.race([abortResponse, sleep(ABORT_REQUEST_DEADLINE_MS)]);
 		// Bounded grace so the aborted run can settle and be recorded in the session.
 		await waitForStatus(worker, ["aborted", "completed", "waiting", "failed"], 300);
 		if (errorMessage) worker.state.error = errorMessage;
@@ -698,6 +763,11 @@ function isActive(status: WorkerStatus): boolean {
 
 function countMessages(value: unknown): number {
 	return Array.isArray(value) ? value.length : 0;
+}
+
+function truncateText(text: string, max: number): string {
+	if (text.length <= max) return text;
+	return `${text.slice(0, max)}...`;
 }
 
 function assistantText(content: unknown): string | undefined {
@@ -760,6 +830,10 @@ function buildTaskPrompt(task: WorkerTaskDefinition): string {
 	if (task.role?.trim()) sections.push(`Role: ${normalizeSessionName(task.role)}`);
 	sections.push(`Task prompt:\n${task.prompt}`);
 	return sections.join("\n\n");
+}
+
+function sleep(ms: number): Promise<void> {
+	return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
 }
 
 async function waitForStatus(worker: WorkerHandle, statuses: WorkerStatus[], timeoutMs: number): Promise<void> {

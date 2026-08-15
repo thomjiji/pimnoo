@@ -57,6 +57,58 @@ export function formatStopText(state: WorkerTaskState): string {
 
 const SUMMARY_ORDER: readonly WorkerStatus[] = ["starting", "running", "waiting", "wrapping up", "completed", "failed", "aborted", "stopped", "limit-reached", "timed-out"];
 
+function formatDuration(ms: number): string {
+	if (ms < 1000) return `${ms}ms`;
+	if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
+	const minutes = Math.floor(ms / 60_000);
+	const seconds = Math.round((ms % 60_000) / 1000);
+	return `${minutes}m${seconds.toString().padStart(2, "0")}s`;
+}
+
+/** One progress line per worker, used for live wait progress in the transcript. */
+export function formatProgressText(states: WorkerTaskState[]): string {
+	return states
+		.map((state) => {
+			const parts = [`${state.taskId} (${state.sessionName}): ${state.status}`];
+			if (state.turns > 0) parts.push(`turn ${state.turns}`);
+			if (state.status === "running" && state.lastTool) parts.push(`${state.lastTool} ${formatDuration(state.toolElapsedMs ?? 0)}`);
+			if (state.elapsedMs !== undefined) parts.push(`elapsed ${formatDuration(state.elapsedMs)}`);
+			return parts.join(" · ");
+		})
+		.join("\n");
+}
+
+/** The bounded recent-activity tail of one worker, for the logs action. */
+export function formatLogsText(state: WorkerTaskState): string {
+	const header = `${state.taskId} (${state.sessionName}): ${state.status}`;
+	const body = (state.activity ?? []).join("\n");
+	return `${header}\n${body || "  (no activity recorded)"}`;
+}
+
+const MAX_WIDGET_WORKERS = 5;
+
+/**
+ * Compact multi-line panel for active workers, rendered through
+ * ctx.ui.setWidget. Returns undefined when no worker is active so the
+ * caller clears the widget.
+ */
+export function widgetLines(states: WorkerTaskState[]): string[] | undefined {
+	const active = states.filter((state) => !TERMINAL_WORKER_STATUSES.includes(state.status));
+	if (active.length === 0) return undefined;
+	const lines = [`delegate: ${active.length} active worker${active.length === 1 ? "" : "s"}`];
+	for (const state of active.slice(0, MAX_WIDGET_WORKERS)) {
+		const parts = [`${state.sessionName}: ${state.status}`];
+		if (state.turns > 0) parts.push(`turn ${state.turns}`);
+		if (state.status === "running" && state.lastTool) parts.push(`${state.lastTool} ${formatDuration(state.toolElapsedMs ?? 0)}`);
+		if (state.elapsedMs !== undefined) parts.push(formatDuration(state.elapsedMs));
+		lines.push(parts.join(" · "));
+		const last = state.activity?.[state.activity.length - 1];
+		if (last) lines.push(`  ${last}`);
+	}
+	if (active.length > MAX_WIDGET_WORKERS) lines.push(`  ...and ${active.length - MAX_WIDGET_WORKERS} more`);
+	return lines;
+}
+
 /**
  * One-line footer summary for active workers only. Returns undefined when
  * every worker is terminal or settled, so the caller clears the status entry

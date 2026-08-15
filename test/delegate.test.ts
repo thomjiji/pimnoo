@@ -6,8 +6,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { isDelegateWorkerProcess, WorkerSupervisor } from "../extensions/delegate/supervisor.ts";
-import { formatReportText, formatStatusText, statusSummaryText } from "../extensions/delegate/format.ts";
+import { applyTaskLimits, isDelegateWorkerProcess, WorkerSupervisor } from "../extensions/delegate/supervisor.ts";
+import { formatLogsText, formatProgressText, formatReportText, formatStatusText, statusSummaryText, widgetLines } from "../extensions/delegate/format.ts";
 
 const execFileAsync = promisify(execFile);
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -657,4 +657,122 @@ test("re-arms the hard-limit grace when a revived worker is already past the lim
 	} finally {
 		await cleanupHarness(harness);
 	}
+});
+
+test("wait cancellation terminates a worker whose abort response hangs, within a bounded time", async () => {
+	const harness = await createHarness();
+	try {
+		const [worker] = await startTasks(harness, [{ prompt: "@fake:hang-abort\n@fake:hold\nWork." }]);
+		await until(() => harness.supervisor.status(worker.taskId)[0].status === "running");
+		const controller = new AbortController();
+		const startedAt = Date.now();
+		const waiting = harness.supervisor.waitForTerminal([worker.taskId], controller.signal);
+		controller.abort();
+		const states = await waiting;
+		const elapsed = Date.now() - startedAt;
+		assert.equal(states[0].status, "stopped");
+		assert.ok(elapsed < 5000, `cancellation took ${elapsed}ms, expected a bounded stop`);
+		await until(() => harness.supervisor.status(worker.taskId)[0].exitCode !== undefined);
+		assert.equal((await stat(worker.sessionFile)).isFile(), true);
+	} finally {
+		await cleanupHarness(harness);
+	}
+});
+
+test("applyTaskLimits fills missing task limits from top-level defaults", () => {
+	const defaults = { maxTurns: 10, softTurnThreshold: 8, timeoutMs: 5000 };
+	const tasks = [
+		{ prompt: "a" },
+		{ prompt: "b", maxTurns: 20 },
+		{ prompt: "c", timeoutMs: 999 },
+	];
+	const merged = applyTaskLimits(tasks, defaults);
+	assert.equal(merged[0].maxTurns, 10);
+	assert.equal(merged[0].softTurnThreshold, 8);
+	assert.equal(merged[0].timeoutMs, 5000);
+	assert.equal(merged[1].maxTurns, 20);
+	assert.equal(merged[1].softTurnThreshold, 8);
+	assert.equal(merged[1].timeoutMs, 5000);
+	assert.equal(merged[2].maxTurns, 10);
+	assert.equal(merged[2].timeoutMs, 999);
+	assert.deepEqual(applyTaskLimits(tasks, {}), tasks);
+});
+
+test("records a bounded activity tail and serves it through logs", async () => {
+	const harness = await createHarness();
+	try {
+		const [worker] = await startTasks(harness, [{ prompt: "@fake:settle Log report.\nWork." }]);
+		await until(() => harness.supervisor.status(worker.taskId)[0].status === "completed");
+		const logs = harness.supervisor.logs(worker.taskId);
+		assert.ok(logs.some((line) => line.includes("turn 1 started")), logs.join("|"));
+		assert.ok(logs.some((line) => line.includes("assistant: Log report.")), logs.join("|"));
+		assert.ok(logs.some((line) => line.includes("run settled")), logs.join("|"));
+		const state = harness.supervisor.status(worker.taskId)[0];
+		assert.ok((state.elapsedMs ?? 0) > 0);
+		assert.ok(Array.isArray(state.activity) && state.activity.length > 0);
+		assert.throws(() => harness.supervisor.logs("task-unknown"), /No worker with task ID/);
+	} finally {
+		await cleanupHarness(harness);
+	}
+});
+
+test("records tool activity with bounded lines and reports tool durations", async () => {
+	const harness = await createHarness();
+	try {
+		const [worker] = await startTasks(harness, [{ prompt: "@fake:settle Done.\nWork." }]);
+		const progress: string[] = [];
+		const states = await harness.supervisor.waitForTerminal([worker.taskId], undefined, (snapshot) => {
+			progress.push(snapshot[0]?.taskId ?? "");
+		});
+		assert.equal(states[0].status, "completed");
+		assert.ok(progress.length >= 1, "progress callback should fire at least once");
+		assert.ok(progress.every((id) => id === worker.taskId));
+	} finally {
+		await cleanupHarness(harness);
+	}
+});
+
+test("formats progress, logs, and widget lines for the TUI surfaces", () => {
+	const running = {
+		taskId: "task-run",
+		branch: "subagent/task-run",
+		cwd: "/tmp/wt-run",
+		sessionName: "subagent/runner",
+		turns: 3,
+		pendingSteering: 0,
+		pendingFollowUps: 0,
+		status: "running",
+		worktree: "/tmp/wt-run",
+		sessionFile: "/sessions/run.jsonl",
+		lastTool: "bash",
+		toolElapsedMs: 45_000,
+		elapsedMs: 252_000,
+		activity: ["10:00:01 turn 3 started", "10:00:02 tool bash started: {\"command\":\"sleep 25\"}"],
+	} as const;
+	const done = {
+		...running,
+		taskId: "task-done",
+		sessionName: "subagent/finished",
+		status: "completed",
+		lastTool: undefined,
+		toolElapsedMs: 0,
+	} as const;
+
+	const progress = formatProgressText([running]);
+	assert.match(progress, /task-run \(subagent\/runner\): running/);
+	assert.match(progress, /turn 3/);
+	assert.match(progress, /bash 45s/);
+	assert.match(progress, /elapsed 4m12s/);
+
+	const logs = formatLogsText(running);
+	assert.match(logs, /task-run \(subagent\/runner\): running/);
+	assert.match(logs, /tool bash started/);
+	assert.equal(formatLogsText({ ...running, activity: [] }), "task-run (subagent/runner): running\n  (no activity recorded)");
+
+	const lines = widgetLines([running, done]);
+	assert.ok(lines, "widget should show while a worker is active");
+	assert.equal(lines[0], "delegate: 1 active worker");
+	assert.match(lines[1], /subagent\/runner: running · turn 3 · bash 45s · 4m12s/);
+	assert.equal(lines.some((line) => line.includes("subagent/finished")), false);
+	assert.equal(widgetLines([done]), undefined);
 });
