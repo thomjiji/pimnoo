@@ -17,6 +17,9 @@ export default function blockDepthRenderProbe(_pi: ExtensionAPI): void {
 	if (lines.length !== 4 || lines.some((line) => visibleWidth(line) !== 40)) {
 		throw new Error("block-depth hard mode did not render a width-preserving shadow");
 	}
+	if (!lines[0]?.includes("▇▄▁") || !lines.at(-1)?.startsWith("   ")) {
+		throw new Error("block-depth hard mode did not render a three-column beveled side");
+	}
 
 	const ordinaryBox = new Box(1, 1, (text) => `\x1b[48;5;22m${text}\x1b[49m`);
 	ordinaryBox.addChild(new Text("ordinary-layout-box", 0, 0));

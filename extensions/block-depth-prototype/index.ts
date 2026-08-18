@@ -37,6 +37,8 @@ const BLOCK_BACKGROUNDS: ThemeBg[] = [
 	"toolErrorBg",
 ];
 const DEPTH_MODES = new Set<DepthMode>(["hard", "half", "deep", "off"]);
+const HARD_SIDE_WIDTH = 3;
+const HARD_TOP_BEVEL = "▇▄▁";
 
 const BASIC_ANSI_COLORS: RGB[] = [
 	{ r: 0, g: 0, b: 0 },
@@ -133,9 +135,12 @@ function isDepthMode(value: string): value is DepthMode {
 }
 
 function renderHard(lines: string[], faceWidth: number, shadow: RGB): string[] {
+	const [firstLine, ...remainingLines] = lines;
+	if (!firstLine) return lines;
 	return [
-		...lines.map((line) => line + background(" ", shadow)),
-		" " + background(" ".repeat(faceWidth), shadow),
+		firstLine + foreground(HARD_TOP_BEVEL, shadow),
+		...remainingLines.map((line) => line + background(" ".repeat(HARD_SIDE_WIDTH), shadow)),
+		" ".repeat(HARD_SIDE_WIDTH) + background(" ".repeat(faceWidth), shadow),
 	];
 }
 
@@ -172,7 +177,7 @@ function installPatch(owner: object): PatchState {
 		const faceColor = semanticBackgroundColor(this as unknown as RuntimeBox);
 		if (!faceColor) return originalRender.call(this, width);
 
-		const offset = mode === "deep" ? 2 : 1;
+		const offset = mode === "hard" ? HARD_SIDE_WIDTH : mode === "deep" ? 2 : 1;
 		if (width <= offset + 2) return originalRender.call(this, width);
 
 		const faceWidth = width - offset;
