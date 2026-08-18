@@ -70,8 +70,8 @@ function runBlockStyleProbe(): void {
 		if (railLines.length !== 3 || railLines.some((line) => visibleWidth(line) !== 40)) {
 			throw new Error("block-style rail did not preserve terminal width");
 		}
-		if (!railLines[1]?.includes("┃") || railLines.some((line) => line.includes("\x1b[48;"))) {
-			throw new Error("block-style rail did not render a fill-free semantic rail");
+		if (!railLines[1]?.includes("┃") || !railLines.some((line) => line.includes("\x1b[48;"))) {
+			throw new Error("block-style rail did not preserve the semantic face fill");
 		}
 
 		patch.style = "spotlight";

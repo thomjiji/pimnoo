@@ -65,7 +65,7 @@ function renderOutline(lines: string[], faceWidth: number, border: RGB): string[
 }
 
 function renderRail(lines: string[], accent: RGB): string[] {
-	return lines.map((line) => foreground("┃", accent) + stripBackground(line));
+	return lines.map((line) => foreground("┃", accent) + line);
 }
 
 function renderSpotlight(lines: string[], faceColor: RGB, semanticName: ThemeBg): string[] {
