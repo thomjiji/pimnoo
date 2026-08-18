@@ -39,6 +39,8 @@ const BLOCK_BACKGROUNDS: ThemeBg[] = [
 const DEPTH_MODES = new Set<DepthMode>(["hard", "half", "deep", "off"]);
 const HARD_SIDE_WIDTH = 3;
 const HARD_TOP_BEVEL = "▇▄▁";
+const HALF_SIDE_WIDTH = 2;
+const HALF_TOP_BEVEL = "▆▂";
 
 const BASIC_ANSI_COLORS: RGB[] = [
 	{ r: 0, g: 0, b: 0 },
@@ -145,9 +147,13 @@ function renderHard(lines: string[], faceWidth: number, shadow: RGB): string[] {
 }
 
 function renderHalf(lines: string[], faceWidth: number, shadow: RGB): string[] {
+	const [firstLine, ...remainingLines] = lines;
+	if (!firstLine) return lines;
+	const bottom = "▝" + "▀".repeat(Math.max(0, faceWidth - 1)) + "▘";
 	return [
-		...lines.map((line) => line + foreground("▌", shadow)),
-		" " + foreground("▀".repeat(faceWidth), shadow),
+		firstLine + foreground(HALF_TOP_BEVEL, shadow),
+		...remainingLines.map((line) => line + background(" ", shadow) + foreground("▌", shadow)),
+		" " + foreground(bottom, shadow),
 	];
 }
 
@@ -177,7 +183,7 @@ function installPatch(owner: object): PatchState {
 		const faceColor = semanticBackgroundColor(this as unknown as RuntimeBox);
 		if (!faceColor) return originalRender.call(this, width);
 
-		const offset = mode === "hard" ? HARD_SIDE_WIDTH : mode === "deep" ? 2 : 1;
+		const offset = mode === "hard" ? HARD_SIDE_WIDTH : mode === "half" ? HALF_SIDE_WIDTH : 2;
 		if (width <= offset + 2) return originalRender.call(this, width);
 
 		const faceWidth = width - offset;

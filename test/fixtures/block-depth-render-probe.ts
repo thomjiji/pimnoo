@@ -32,4 +32,23 @@ export default function blockDepthRenderProbe(_pi: ExtensionAPI): void {
 	if (JSON.stringify(box.render(3)) !== JSON.stringify(nativeNarrowBox.render(3))) {
 		throw new Error("block-depth did not fall back to native rendering at narrow widths");
 	}
+
+	const patch = (Box.prototype as typeof Box.prototype & Record<PropertyKey, unknown>)[
+		Symbol.for("pimnoo.block-depth-prototype")
+	] as { mode: "hard" | "half" | "deep" | "off" } | undefined;
+	if (!patch) throw new Error("block-depth patch marker is missing");
+	patch.mode = "half";
+	try {
+		const halfBox = new Box(1, 1, (text) => userMessageBackground(text));
+		halfBox.addChild(new Text("x".repeat(37), 0, 0));
+		const halfLines = halfBox.render(40);
+		if (halfLines.length !== 5 || halfLines.some((line) => visibleWidth(line) !== 40)) {
+			throw new Error("block-depth half mode did not reserve proportional side width");
+		}
+		if (!halfLines[0]?.includes("▆▂") || !halfLines.at(-1)?.includes("▝") || !halfLines.at(-1)?.includes("▘")) {
+			throw new Error("block-depth half mode did not render proportional beveled corners");
+		}
+	} finally {
+		patch.mode = "hard";
+	}
 }
