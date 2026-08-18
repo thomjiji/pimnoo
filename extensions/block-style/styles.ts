@@ -1,6 +1,6 @@
 import { background, foreground, shade, stripBackground, type RGB, type ThemeBg } from "./colors.ts";
 
-export type BlockStyle = "half" | "full" | "deep" | "outline" | "rail" | "spotlight" | "off";
+export type BlockStyle = "half" | "half-hatch" | "full" | "deep" | "outline" | "rail" | "spotlight" | "off";
 export type ActiveBlockStyle = Exclude<BlockStyle, "off">;
 
 export type BlockStyleContext = {
@@ -22,6 +22,7 @@ const HALF_SIDE_WIDTH = 2;
 const RAIL_WIDTH = 1;
 const RAIL_GLYPH = "█";
 const HALF_TOP_CUTOUT = "▄▖";
+const HALF_HATCH_GLYPH = "░";
 
 function renderFull(lines: string[], faceWidth: number, shadow: RGB): string[] {
 	const [firstLine, ...remainingLines] = lines;
@@ -42,6 +43,12 @@ function renderHalf(lines: string[], faceWidth: number, shadow: RGB): string[] {
 		...remainingLines.map((line) => line + background(" ", shadow) + foreground("▌", shadow)),
 		" " + foreground(bottom, shadow),
 	];
+}
+
+function renderHalfHatch(lines: string[], faceWidth: number, shadow: RGB): string[] {
+	const side = foreground(HALF_HATCH_GLYPH.repeat(HALF_SIDE_WIDTH), shadow);
+	const bottom = foreground(HALF_HATCH_GLYPH.repeat(faceWidth + 1), shadow);
+	return [...lines.map((line) => line + side), " " + bottom];
 }
 
 function renderDeep(lines: string[], faceWidth: number, near: RGB, far: RGB): string[] {
@@ -85,6 +92,10 @@ export const BLOCK_STYLES: Record<ActiveBlockStyle, BlockStyleDefinition> = {
 	half: {
 		reservedWidth: HALF_SIDE_WIDTH,
 		render: ({ lines, faceWidth, nearColor }) => renderHalf(lines, faceWidth, nearColor),
+	},
+	"half-hatch": {
+		reservedWidth: HALF_SIDE_WIDTH,
+		render: ({ lines, faceWidth, nearColor }) => renderHalfHatch(lines, faceWidth, nearColor),
 	},
 	full: {
 		reservedWidth: FULL_SIDE_WIDTH,

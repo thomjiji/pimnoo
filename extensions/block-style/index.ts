@@ -2,7 +2,7 @@
  * Apply terminal-friendly styles to Pi's semantic message blocks.
  * Switch at runtime with:
  *
- *   /block-style half|full|deep|outline|rail|spotlight|off
+ *   /block-style half|half-hatch|full|deep|outline|rail|spotlight|off
  *
  * This intentionally patches the shared Box rendering seam. It only touches
  * boxes whose callbacks explicitly request Pi's user/custom/tool message
@@ -74,11 +74,11 @@ export default function blockStyle(pi: ExtensionAPI): void {
 	const state = installPatch(owner);
 
 	pi.registerCommand("block-style", {
-		description: "Switch semantic block style (half, full, deep, outline, rail, spotlight, off)",
+		description: "Switch semantic block style (half, half-hatch, full, deep, outline, rail, spotlight, off)",
 		handler: (args, ctx) => {
 			const requested = args.trim().toLowerCase();
 			if (requested && !isBlockStyle(requested)) {
-				ctx.ui.notify("Usage: /block-style [half|full|deep|outline|rail|spotlight|off]", "warning");
+				ctx.ui.notify("Usage: /block-style [half|half-hatch|full|deep|outline|rail|spotlight|off]", "warning");
 				return;
 			}
 			if (isBlockStyle(requested)) state.style = requested;

@@ -10,7 +10,7 @@ const semanticBackgroundName = "userMessageBg";
 const userMessageBackground = (text: string): string => probeTheme.bg(semanticBackgroundName, text);
 const pendingToolBackground = (text: string): string => probeTheme.bg("toolPendingBg", text);
 
-type BlockStyle = "half" | "full" | "deep" | "outline" | "rail" | "spotlight" | "off";
+type BlockStyle = "half" | "half-hatch" | "full" | "deep" | "outline" | "rail" | "spotlight" | "off";
 
 /** Regression probe: the real Box patch renders styles without changing terminal width. */
 export default function blockStyleRenderProbe(pi: ExtensionAPI): void {
@@ -35,6 +35,17 @@ function runBlockStyleProbe(): void {
 	}
 	if (!halfLines[0]?.includes("▄▖") || !halfLines.at(-1)?.includes("▝") || !halfLines.at(-1)?.includes("▘")) {
 		throw new Error("block-style half mode did not render proportional cut-out corners");
+	}
+
+	patch.style = "half-hatch";
+	const halfHatchBox = new Box(1, 1, (text) => userMessageBackground(text));
+	halfHatchBox.addChild(new Text("x".repeat(37), 0, 0));
+	const halfHatchLines = halfHatchBox.render(40);
+	if (halfHatchLines.length !== 5 || halfHatchLines.some((line) => visibleWidth(line) !== 40)) {
+		throw new Error("block-style half-hatch mode did not reserve proportional side width");
+	}
+	if (halfHatchLines.some((line) => !line.includes("░")) || halfHatchLines.some((line) => /[▄▖▌▝▀▘]/u.test(line))) {
+		throw new Error("block-style half-hatch mode did not render a unified shade texture");
 	}
 
 	patch.style = "full";
