@@ -47,8 +47,11 @@ function renderHalf(lines: string[], faceWidth: number, shadow: RGB): string[] {
 
 function renderHalfHatch(lines: string[], faceWidth: number, shadow: RGB): string[] {
 	const side = foreground(HALF_HATCH_GLYPH.repeat(HALF_SIDE_WIDTH), shadow);
+	const top = foreground(HALF_HATCH_GLYPH + " ", shadow);
 	const bottom = foreground(HALF_HATCH_GLYPH.repeat(faceWidth + 1), shadow);
-	return [...lines.map((line) => line + side), " " + bottom];
+	const [firstLine, ...remainingLines] = lines;
+	if (!firstLine) return lines;
+	return [firstLine + top, ...remainingLines.map((line) => line + side), " " + bottom];
 }
 
 function renderDeep(lines: string[], faceWidth: number, near: RGB, far: RGB): string[] {

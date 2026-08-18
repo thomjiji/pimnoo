@@ -47,6 +47,9 @@ function runBlockStyleProbe(): void {
 	if (halfHatchLines.some((line) => !line.includes("░")) || halfHatchLines.some((line) => /[▄▖▌▝▀▘]/u.test(line))) {
 		throw new Error("block-style half-hatch mode did not render a unified shade texture");
 	}
+	if (!halfHatchLines[0]?.includes("░ \x1b[39m")) {
+		throw new Error("block-style half-hatch mode did not cut out the upper-right square");
+	}
 
 	patch.style = "full";
 	try {
