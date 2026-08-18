@@ -55,10 +55,10 @@ function runBlockStyleProbe(): void {
 		if (outlineLines.length !== 3 || outlineLines.some((line) => visibleWidth(line) !== 40)) {
 			throw new Error("block-style outline did not preserve terminal width");
 		}
-		if (!outlineLines[0]?.includes("╭") || !outlineLines[0]?.includes("╮") || !outlineLines.at(-1)?.includes("╰")) {
-			throw new Error("block-style outline did not render its corners");
+		if (!outlineLines[0]?.includes("┏") || !outlineLines[0]?.includes("┓") || !outlineLines.at(-1)?.includes("┗")) {
+			throw new Error("block-style outline did not render square heavy corners");
 		}
-		if (!outlineLines[1]?.includes("│") || outlineLines.some((line) => line.includes("\x1b[48;"))) {
+		if (!outlineLines[1]?.includes("┃") || !outlineLines.some((line) => line.includes("━")) || outlineLines.some((line) => line.includes("\x1b[48;"))) {
 			throw new Error("block-style outline did not remove the semantic face fill");
 		}
 

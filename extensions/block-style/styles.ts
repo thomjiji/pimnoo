@@ -52,13 +52,13 @@ function renderDeep(lines: string[], faceWidth: number, near: RGB, far: RGB): st
 function renderOutline(lines: string[], faceWidth: number, border: RGB): string[] {
 	const cleanLines = lines.map(stripBackground);
 	if (cleanLines.length < 2) {
-		return cleanLines.map((line) => foreground("│", border) + line + foreground("│", border));
+		return cleanLines.map((line) => foreground("┃", border) + line + foreground("┃", border));
 	}
 
-	const top = foreground(`╭${"─".repeat(faceWidth)}╮`, border);
-	const bottom = foreground(`╰${"─".repeat(faceWidth)}╯`, border);
+	const top = foreground(`┏${"━".repeat(faceWidth)}┓`, border);
+	const bottom = foreground(`┗${"━".repeat(faceWidth)}┛`, border);
 	const middle = cleanLines.slice(1, -1).map(
-		(line) => foreground("│", border) + line + foreground("│", border),
+		(line) => foreground("┃", border) + line + foreground("┃", border),
 	);
 	return [top, ...middle, bottom];
 }
