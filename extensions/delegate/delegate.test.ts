@@ -6,12 +6,12 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { applyTaskLimits, isDelegateWorkerProcess, WorkerSupervisor } from "../extensions/delegate/supervisor.ts";
-import { fleetListLines, formatLogsText, formatProgressText, formatReportText, formatStatusText } from "../extensions/delegate/format.ts";
+import { applyTaskLimits, isDelegateWorkerProcess, WorkerSupervisor } from "./supervisor.ts";
+import { fleetListLines, formatLogsText, formatProgressText, formatReportText, formatStatusText } from "./format.ts";
 
 const execFileAsync = promisify(execFile);
-const root = dirname(dirname(fileURLToPath(import.meta.url)));
-const fakeWorker = join(root, "test", "fixtures", "fake-rpc-worker.mjs");
+const extensionDir = dirname(fileURLToPath(import.meta.url));
+const fakeWorker = join(extensionDir, "test-fixtures", "fake-rpc-worker.mjs");
 
 async function git(cwd: string, ...args: string[]) {
 	return execFileAsync("git", args, { cwd, encoding: "utf8" });
@@ -798,7 +798,7 @@ test("renders fleet list rows with selection and expansion", () => {
 });
 
 test("fleet list renders themed widget lines, lingers finished workers, and clears on dispose", async () => {
-	const { FleetList } = await import("../extensions/delegate/fleet-list.ts");
+	const { FleetList } = await import("./fleet-list.ts");
 	const rendered: string[][] = [];
 	let cleared = 0;
 	const fakeTheme = { bold: (text: string) => `B(${text})`, fg: (name: string, text: string) => `${name}(${text})` };

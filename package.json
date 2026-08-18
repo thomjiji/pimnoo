@@ -18,8 +18,8 @@
     "extensions": ["./extensions"]
   },
   "scripts": {
-    "test": "node --experimental-strip-types --test test/*.test.ts && node test/smoke.mjs",
-    "test:unit": "node --experimental-strip-types --test test/*.test.ts",
+    "test": "node --experimental-strip-types --test test/*.test.ts extensions/*/*.test.ts && node test/smoke.mjs",
+    "test:unit": "node --experimental-strip-types --test test/*.test.ts extensions/*/*.test.ts",
     "test:smoke": "node test/smoke.mjs",
     "typecheck": "node scripts/typecheck.mjs"
   }

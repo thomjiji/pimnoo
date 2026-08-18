@@ -372,7 +372,7 @@ async function assertStandaloneBlockDepthLoads(tempRoot) {
 	const agentDir = join(tempRoot, "agent-standalone-block-depth");
 	const projectDir = join(tempRoot, "project-standalone-block-depth");
 	const extensionDir = join(root, "extensions", "block-depth");
-	const probePath = join(root, "test", "fixtures", "block-depth-render-probe.ts");
+	const probePath = join(root, "extensions", "block-depth", "test-fixtures", "block-depth-render-probe.ts");
 	await mkdir(projectDir, { recursive: true });
 	await run(PI_BIN, ["install", extensionDir], {
 		cwd: projectDir,

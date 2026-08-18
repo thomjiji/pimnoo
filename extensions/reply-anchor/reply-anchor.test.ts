@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { REPLY_ANCHOR, addReplyAnchor } from "../extensions/reply-anchor/index.ts";
+import { REPLY_ANCHOR, addReplyAnchor } from "./index.ts";
 
 test("prefixes visible assistant replies with the searchable anchor", () => {
 	assert.equal(addReplyAnchor("Here is the answer.", "assistant"), `${REPLY_ANCHOR}\n\nHere is the answer.`);

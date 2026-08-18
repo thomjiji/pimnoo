@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { extractText, parsePathArg, renderMarkdown } from "../extensions/export-md/index.ts";
+import { extractText, parsePathArg, renderMarkdown } from "./index.ts";
 
 test("extracts visible text from string and content blocks", () => {
 	assert.equal(extractText("plain text"), "plain text");

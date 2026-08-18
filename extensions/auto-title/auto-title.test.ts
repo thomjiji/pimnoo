@@ -9,7 +9,7 @@ import {
 	formatSessionTimestamp,
 	TITLE_TIMEOUT_MS,
 	withTimeout,
-} from "../extensions/auto-title/helpers.ts";
+} from "./helpers.ts";
 
 test("normalizes generated titles to sentence case and a bounded length", () => {
 	assert.equal(cleanTitle("```\n  \"FIX THE LOGIN BUG!!!\"\n```\nignored"), "Fix the login bug");

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { FULLSCREEN_VIEW_OPTIONS, frameWithPiBorders } from "../extensions/session-breakdown/layout.ts";
+import { FULLSCREEN_VIEW_OPTIONS, frameWithPiBorders } from "./layout.ts";
 
 test("frames the session dashboard with Pi's open top and bottom borders", () => {
 	const border = "─".repeat(12);

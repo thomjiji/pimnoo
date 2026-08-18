@@ -15,7 +15,7 @@
 | `reply-anchor` | `extensions/reply-anchor/index.ts` | 在 agent 回复开头添加可搜索的 `§` 锚点 |
 | `session-breakdown` | `extensions/session-breakdown/index.ts` | 以 Pi 风格全屏界面分析最近 7、30、90 天的 session 使用情况 |
 
-每个扩展目录都有自己的最小 `package.json`，通过 `pi.extensions` 明确只加载 `./index.ts`；目录里的 helper（例如 `bash-readable/format.ts` 和 `auto-title/helpers.ts`）仍然只是该扩展的内部源码，不会被当成独立 extension 加载。根目录的 `package.json` 通过 `pi.extensions` 声明 `./extensions`，所以安装根 package 时仍然会加载全部这些自包含单元。
+每个扩展目录都有自己的最小 `package.json`，通过 `pi.extensions` 明确只加载 `./index.ts`；目录里的 helper、extension-specific test 和 fixture（例如 `bash-readable/format.ts` 和 `auto-title/auto-title.test.ts`）都是该扩展的内部源码，不会被当成独立 extension 加载。根目录的 `package.json` 通过 `pi.extensions` 声明 `./extensions`，所以安装根 package 时仍然会加载全部这些自包含单元。
 
 ## Delegate worker
 
@@ -170,7 +170,7 @@ pi list
 新增 extension 时按下面的顺序操作：
 
 1. 将源码放入 `extensions/<name>/`，把入口命名为 `index.ts`，并为该目录添加只声明 `./index.ts` 的最小 `package.json`。
-2. 在根 `package.json` 的 `pi.extensions` 允许范围内确认入口可被发现；不要把 helper、fixture、测试或文档放入可执行入口。
+2. 在根 `package.json` 的 `pi.extensions` 允许范围内确认入口可被发现；把 extension-specific test 和 fixture 放在该扩展目录中，并确认最小 manifest 仍然只加载 `./index.ts`。
 3. 为可观察行为增加独立于 package 安装机制的测试，并用该目录的 local path 验证它可以单独加载；如果 extension 没有合适的纯函数 seam，至少让 smoke test 验证加载成功。
 4. 更新上面的扩展清单和本节 checklist。
 5. 检查旧全局副本、命令重复和不应加载的 helper。
@@ -181,7 +181,7 @@ pi list
 
 ## 测试
 
-单元测试不需要 live model、credential、npm publication 或用户现有的 Pi settings：
+extension-specific unit test 与 fixture 和对应源码放在同一个 `extensions/<name>/` 目录；根 `test/` 只保留 umbrella package 的 manifest 测试和跨 package smoke test。单元测试不需要 live model、credential、npm publication 或用户现有的 Pi settings：
 
 ```bash
 npm run test:unit
@@ -203,6 +203,6 @@ npm run test:smoke
 
 ## 目录和发布范围
 
-根 `package.json` 是 umbrella package 的聚合 manifest；每个 `extensions/<name>/package.json` 是只声明 `./index.ts` 的最小独立 Pi manifest。`extensions/` 包含八个运行时 extension 和各自的内部 helper；`test/`、`scripts/` 和文档不在 `pi.extensions` 的资源范围内。当前不发布 npm、不添加第三方 runtime dependency，也不提供会安装其他 package 的 `/setup` 命令。
+根 `package.json` 是 umbrella package 的聚合 manifest；每个 `extensions/<name>/package.json` 是只声明 `./index.ts` 的最小独立 Pi manifest。`extensions/` 包含八个运行时 extension、各自的 helper 以及 colocated test/fixture；根 `test/` 只包含 package boundary 测试和跨 package smoke test，二者都不在 `pi.extensions` 的资源范围内。当前不发布 npm、不添加第三方 runtime dependency，也不提供会安装其他 package 的 `/setup` 命令。
 
 `session-breakdown` 集成自 mitsuhiko/agent-stuff 的 `extensions/session-breakdown.ts`（Apache-2.0），保留数据分析逻辑并将全屏界面改为 Pi 风格的上下横线布局。许可证文本见 `LICENSES/Apache-2.0.txt`。

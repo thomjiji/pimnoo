@@ -27,4 +27,4 @@ for (const file of files) {
 	}
 }
 
-console.log(`Checked ${files.length} TypeScript extension files for syntax.`);
+console.log(`Checked ${files.length} TypeScript files under extensions/ for syntax.`);

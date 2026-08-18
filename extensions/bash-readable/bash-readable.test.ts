@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { formatShellCommand, splitShellCommand } from "../extensions/bash-readable/format.ts";
+import { formatShellCommand, splitShellCommand } from "./format.ts";
 
 test("splits top-level chaining operators but keeps pipelines inline", () => {
 	assert.deepEqual(splitShellCommand("cd /workspace && npm test; echo done"), [
@@ -35,7 +35,7 @@ test("preserves multiline command lines and continuation prompts", () => {
 });
 
 test("resolves bash execution from the active session cwd", async () => {
-	const source = await readFile(new URL("../extensions/bash-readable/index.ts", import.meta.url), "utf8");
+	const source = await readFile(new URL("./index.ts", import.meta.url), "utf8");
 	assert.doesNotMatch(source, /createBashTool\(process\.cwd\(\)\)/);
 	assert.match(source, /const bash = createBashTool\(ctx\.cwd\)/);
 });

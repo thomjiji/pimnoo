@@ -92,7 +92,7 @@ worker 2: stopped
 
 因此，当前所谓的 300 ms bounded grace 不能限制整个 abort 流程，只能限制 abort response 已经返回后的 settle 等待阶段。真实运行中，worker 正在模型调用或模型调用迟迟没有结束时，父会话的取消处理可能被一个无超时的 `rpc.request({ abort })` 延迟。
 
-这不是本次“原始 wait 卡住”的证据，因为原始 wait 是按设计等待 worker 结束；它是用户主动取消之后暴露出的终止路径健壮性问题。现有 fake worker 测试没有暴露它，因为 `test/fixtures/fake-rpc-worker.mjs` 会立即响应 `abort`，随后才释放 hold。
+这不是本次“原始 wait 卡住”的证据，因为原始 wait 是按设计等待 worker 结束；它是用户主动取消之后暴露出的终止路径健壮性问题。现有 fake worker 测试没有暴露它，因为 `extensions/delegate/test-fixtures/fake-rpc-worker.mjs` 会立即响应 `abort`，随后才释放 hold。
 
 ## 其他观察
 
@@ -106,7 +106,7 @@ worker 2: stopped
 
 ### 测试覆盖缺口
 
-现有 `test/delegate.test.ts:552-571` 覆盖了父取消 wait 会停止被等待 worker，但 fake worker 的 abort response 是立即的，没有覆盖下面的真实情况：
+现有 `extensions/delegate/delegate.test.ts:552-571` 覆盖了父取消 wait 会停止被等待 worker，但 fake worker 的 abort response 是立即的，没有覆盖下面的真实情况：
 
 - abort RPC 永远不返回。
 - abort RPC 延迟数秒后才返回。
@@ -139,5 +139,5 @@ worker 2: stopped
 - Worker 2 会话：`/root/.pi/agent/sessions/--workspace-pimnoo--/2026-08-15T09-38-52-641Z_01a004c9-da61-7131-9b80-8c9a5dd82bf3.jsonl`。
 - supervisor 的取消路径：`extensions/delegate/supervisor.ts:288-315,632-676`。
 - delegate 参数 schema 和类型：`extensions/delegate/index.ts:7-24,123-129`。
-- 现有 parent cancellation 测试：`test/delegate.test.ts:552-571`。
+- 现有 parent cancellation 测试：`extensions/delegate/delegate.test.ts:552-571`。
 - Pi RPC abort 实现：`/usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/modes/rpc/rpc-mode.js:298-337` 和 `dist/core/agent-session.js:1168-1174`。
