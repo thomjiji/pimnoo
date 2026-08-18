@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { applyTaskLimits, isDelegateWorkerProcess, WorkerSupervisor } from "./supervisor.ts";
-import { fleetListLines, formatLogsText, formatProgressText, formatReportText, formatStatusText } from "./format.ts";
+import { fleetListLines, formatCleanText, formatLogsText, formatProgressText, formatReportText, formatStatusText } from "./format.ts";
 
 const execFileAsync = promisify(execFile);
 const extensionDir = dirname(fileURLToPath(import.meta.url));
@@ -477,6 +477,119 @@ test("stop terminates a completed worker's process", async () => {
 		assert.equal(state.status, "stopped");
 		await until(() => harness.supervisor.status(worker.taskId)[0].exitCode !== undefined);
 		assert.equal((await stat(worker.sessionFile)).isFile(), true);
+	} finally {
+		await cleanupHarness(harness);
+	}
+});
+
+test("cleans a terminal worker's session, worktree, and branch while protecting the parent", async () => {
+	const harness = await createHarness();
+	try {
+		const [worker] = await startTasks(harness, [{ prompt: "@fake:settle Finished task." }]);
+		await until(() => harness.supervisor.status(worker.taskId)[0].status === "completed");
+		const preview = await harness.supervisor.clean({
+			repositoryCwd: harness.repository,
+			sessionDir: harness.sessionDir,
+			taskId: worker.taskId,
+			dryRun: true,
+		});
+		assert.equal(preview.dryRun, true);
+		assert.equal(preview.resources[0].taskId, worker.taskId);
+		assert.equal((await stat(worker.sessionFile)).isFile(), true);
+		assert.equal((await stat(worker.worktree)).isDirectory(), true);
+		assert.match(formatCleanText(preview), /Would remove 1 delegate artifact set/);
+
+		const result = await harness.supervisor.clean({
+			repositoryCwd: harness.repository,
+			sessionDir: harness.sessionDir,
+			taskId: worker.taskId,
+		});
+		assert.equal(result.resources[0].status, "completed");
+		await assert.rejects(stat(worker.sessionFile));
+		await assert.rejects(stat(worker.worktree));
+		assert.equal((await git(harness.repository, "branch", "--list", worker.branch)).stdout.trim(), "");
+		assert.equal((await stat(join(harness.repository, "README.md"))).isFile(), true);
+		assert.equal((await stat(harness.parentSession)).isFile(), true);
+		assert.throws(() => harness.supervisor.status(worker.taskId), /No worker with task ID/);
+	} finally {
+		await cleanupHarness(harness);
+	}
+});
+
+test("cleans all terminal workers without stopping active workers", async () => {
+	const harness = await createHarness();
+	try {
+		const [finished, active] = await startTasks(harness, [
+			{ prompt: "@fake:settle Finished task." },
+			{ prompt: "@fake:hold\nKeep working." },
+		]);
+		await until(() => harness.supervisor.status(finished.taskId)[0].status === "completed");
+		await until(() => harness.supervisor.status(active.taskId)[0].status === "running");
+		const result = await harness.supervisor.clean({ repositoryCwd: harness.repository, sessionDir: harness.sessionDir });
+		assert.deepEqual(result.resources.map((resource) => resource.taskId), [finished.taskId]);
+		await assert.rejects(stat(finished.worktree));
+		assert.equal(harness.supervisor.status(active.taskId)[0].status, "running");
+		assert.equal((await stat(active.worktree)).isDirectory(), true);
+		await harness.supervisor.stop(active.taskId);
+		await harness.supervisor.clean({ repositoryCwd: harness.repository, sessionDir: harness.sessionDir, taskId: active.taskId });
+	} finally {
+		await cleanupHarness(harness);
+	}
+});
+
+test("rejects cleaning an active worker and leaves it untouched", async () => {
+	const harness = await createHarness();
+	try {
+		const [worker] = await startTasks(harness, [{ prompt: "@fake:delay 400\nKeep working." }]);
+		await until(() => harness.supervisor.status(worker.taskId)[0].status === "running");
+		await harness.supervisor.steer(worker.taskId, "Keep this steering queued.");
+		await until(() => harness.supervisor.status(worker.taskId)[0].status === "waiting");
+		await assert.rejects(
+			harness.supervisor.clean({ repositoryCwd: harness.repository, sessionDir: harness.sessionDir, taskId: worker.taskId }),
+			/active/,
+		);
+		assert.equal((await stat(worker.sessionFile)).isFile(), true);
+		assert.equal((await stat(worker.worktree)).isDirectory(), true);
+		assert.equal(harness.supervisor.status(worker.taskId)[0].status, "waiting");
+		await harness.supervisor.stop(worker.taskId);
+		await harness.supervisor.clean({ repositoryCwd: harness.repository, sessionDir: harness.sessionDir, taskId: worker.taskId });
+	} finally {
+		await cleanupHarness(harness);
+	}
+});
+
+test("discovers and cleans an orphan worktree and branch only with explicit opt-in", async () => {
+	const harness = await createHarness();
+	const taskId = "task-deadbeef";
+	const branch = `subagent/${taskId}`;
+	const worktree = join(harness.temporary, "worktrees", taskId);
+	try {
+		await mkdir(dirname(worktree), { recursive: true });
+		await git(harness.repository, "worktree", "add", "-b", branch, worktree, "HEAD");
+		await assert.rejects(
+			harness.supervisor.clean({ repositoryCwd: harness.repository, sessionDir: harness.sessionDir, taskId }),
+			/includeOrphans/,
+		);
+		const preview = await harness.supervisor.clean({
+			repositoryCwd: harness.repository,
+			sessionDir: harness.sessionDir,
+			taskId,
+			dryRun: true,
+			includeOrphans: true,
+		});
+		assert.equal(preview.resources[0].orphan, true);
+		assert.equal((await stat(worktree)).isDirectory(), true);
+		assert.match(formatCleanText(preview), /orphan/);
+		await harness.supervisor.clean({ repositoryCwd: harness.repository, sessionDir: harness.sessionDir, taskId, includeOrphans: true });
+		await assert.rejects(stat(worktree));
+		assert.equal((await git(harness.repository, "branch", "--list", branch)).stdout.trim(), "");
+
+		const branchOnlyTaskId = "task-cafebabe";
+		const branchOnly = `subagent/${branchOnlyTaskId}`;
+		await git(harness.repository, "branch", branchOnly, "HEAD");
+		await harness.supervisor.clean({ repositoryCwd: harness.repository, sessionDir: harness.sessionDir, taskId: branchOnlyTaskId, includeOrphans: true });
+		assert.equal((await git(harness.repository, "branch", "--list", branchOnly)).stdout.trim(), "");
+		assert.equal((await stat(join(harness.repository, "README.md"))).isFile(), true);
 	} finally {
 		await cleanupHarness(harness);
 	}

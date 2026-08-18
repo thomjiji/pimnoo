@@ -2,8 +2,8 @@ import { Type } from "typebox";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { applyTaskLimits, isDelegateWorkerProcess, WorkerSupervisor } from "./supervisor.ts";
 import { FleetList } from "./fleet-list.ts";
-import { formatLogsText, formatProgressText, formatReportText, formatStartText, formatStatusText, formatStopText } from "./format.ts";
-import type { WorkerTaskState } from "./supervisor.ts";
+import { formatCleanText, formatLogsText, formatProgressText, formatReportText, formatStartText, formatStatusText, formatStopText } from "./format.ts";
+import type { CleanResult, WorkerTaskState } from "./supervisor.ts";
 
 const workerTaskSchema = Type.Object({
 	prompt: Type.String({ description: "The complete task prompt to send to the clean worker context." }),
@@ -17,7 +17,7 @@ const workerTaskSchema = Type.Object({
 });
 
 interface DelegateParameters {
-	action: "start" | "steer" | "follow_up" | "status" | "wait" | "stop" | "logs";
+	action: "start" | "steer" | "follow_up" | "status" | "wait" | "stop" | "logs" | "clean";
 	tasks?: Array<{
 		prompt: string;
 		name?: string;
@@ -31,6 +31,8 @@ interface DelegateParameters {
 	taskId?: string;
 	taskIds?: string[];
 	message?: string;
+	dryRun?: boolean;
+	includeOrphans?: boolean;
 	maxTurns?: number;
 	softTurnThreshold?: number;
 	timeoutMs?: number;
@@ -74,7 +76,7 @@ export default function (pi: ExtensionAPI) {
 		signal: AbortSignal | undefined,
 		onUpdate: ((update: { content: Array<{ type: "text"; text: string }> }) => void) | undefined,
 		ctx: ExtensionContext,
-	): Promise<{ text: string; tasks: WorkerTaskState[] }> {
+	): Promise<{ text: string; tasks: WorkerTaskState[]; clean?: CleanResult }> {
 		switch (params.action) {
 			case "start": {
 				const tasks = applyTaskLimits(params.tasks ?? [], params);
@@ -124,6 +126,16 @@ export default function (pi: ExtensionAPI) {
 				const state = supervisor.status(taskId)[0];
 				return { text: formatLogsText(state), tasks: [state] };
 			}
+			case "clean": {
+				const clean = await supervisor.clean({
+					repositoryCwd: ctx.cwd,
+					sessionDir: ctx.sessionManager.getSessionDir(),
+					taskId: params.taskId,
+					dryRun: params.dryRun,
+					includeOrphans: params.includeOrphans,
+				});
+				return { text: formatCleanText(clean), tasks: [], clean };
+			}
 		}
 	}
 
@@ -131,11 +143,12 @@ export default function (pi: ExtensionAPI) {
 		name: "delegate",
 		label: "Delegate",
 		description:
-			"Start and supervise independent headless Pi RPC workers in clean Git worktrees. Workers receive only the supplied task prompts and cannot delegate recursively.",
+			"Start and supervise independent headless Pi RPC workers in clean Git worktrees, or clean terminal delegate artifacts. Workers receive only the supplied task prompts and cannot delegate recursively.",
 		promptSnippet: "Start, steer, wait for, or stop isolated headless worker tasks",
 		promptGuidelines: [
 			"Use delegate start to launch workers, delegate status to inspect them, and delegate wait to collect their final reports.",
 			"Use delegate logs to read a worker's recent activity when you need to know what it is doing right now.",
+			"Use delegate clean with dryRun first to remove terminal session files, worktrees, and subagent branches; use includeOrphans only for artifacts from an earlier supervisor process.",
 			"Use delegate follow_up for messages that should wait until a worker settles; use delegate steer only while a worker is running.",
 			"When the current model is stuck, delegate a consultation worker with a stronger model and higher thinking level, and include the problem, attempts, and errors in the task prompt.",
 			"Set maxTurns, softTurnThreshold, or timeoutMs per task (or top-level as defaults) to bound worker runtime; unset limits default to 60 turns.",
@@ -143,9 +156,11 @@ export default function (pi: ExtensionAPI) {
 			"Use separate tasks only for work that can safely proceed in independent Git worktrees.",
 		],
 		parameters: Type.Object({
-			action: Type.Union([Type.Literal("start"), Type.Literal("steer"), Type.Literal("follow_up"), Type.Literal("status"), Type.Literal("wait"), Type.Literal("stop"), Type.Literal("logs")]),
+			action: Type.Union([Type.Literal("start"), Type.Literal("steer"), Type.Literal("follow_up"), Type.Literal("status"), Type.Literal("wait"), Type.Literal("stop"), Type.Literal("logs"), Type.Literal("clean")]),
 			tasks: Type.Optional(Type.Array(workerTaskSchema, { minItems: 1, description: "Worker tasks to start (start only)." })),
-			taskId: Type.Optional(Type.String({ description: "Target task ID (steer, follow_up, status, stop, logs)." })),
+			taskId: Type.Optional(Type.String({ description: "Target task ID (steer, follow_up, status, stop, logs, clean)." })),
+			dryRun: Type.Optional(Type.Boolean({ description: "For clean: list matching artifacts without deleting them." })),
+			includeOrphans: Type.Optional(Type.Boolean({ description: "For clean: include recognizable artifacts not managed by this supervisor; use only after confirming no worker process is still active." })),
 			taskIds: Type.Optional(Type.Array(Type.String(), { minItems: 1, description: "Task IDs to wait for (wait only; defaults to all workers)." })),
 			message: Type.Optional(Type.String({ description: "Message text (steer, follow_up)." })),
 			maxTurns: Type.Optional(Type.Integer({ minimum: 1, description: "Default hard turn limit for tasks that do not set their own (start only)." })),
@@ -158,7 +173,7 @@ export default function (pi: ExtensionAPI) {
 				refreshSurfaces(ctx);
 				return {
 					content: [{ type: "text", text: result.text }],
-					details: { action: params.action, tasks: result.tasks },
+					details: { action: params.action, tasks: result.tasks, ...(result.clean ? { clean: result.clean } : {}) },
 				};
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);

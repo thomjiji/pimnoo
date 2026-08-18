@@ -1,5 +1,5 @@
 import { TERMINAL_WORKER_STATUSES } from "./supervisor.ts";
-import type { WorkerStatus, WorkerTaskState } from "./supervisor.ts";
+import type { CleanResult, WorkerStatus, WorkerTaskState } from "./supervisor.ts";
 
 export const MAX_FINAL_TEXT_LENGTH = 2000;
 
@@ -53,6 +53,19 @@ export function formatReportText(states: WorkerTaskState[]): string {
 
 export function formatStopText(state: WorkerTaskState): string {
 	return `Stopped worker ${state.taskId} (${state.sessionName}): ${state.status}\n  worktree: ${state.worktree}\n  session: ${state.sessionFile}`;
+}
+
+export function formatCleanText(result: CleanResult): string {
+	if (result.resources.length === 0) return result.dryRun ? "No terminal delegate artifacts would be removed." : "No terminal delegate artifacts to clean.";
+	const verb = result.dryRun ? "Would remove" : "Removed";
+	return `${verb} ${result.resources.length} delegate artifact set(s):\n${result.resources
+		.map((resource) => {
+			const paths = [resource.sessionFile && `session ${resource.sessionFile}`, resource.worktree && `worktree ${resource.worktree}`, resource.branch && `branch ${resource.branch}`]
+				.filter(Boolean)
+				.join(", ");
+			return `- ${resource.taskId} (${resource.status}${resource.orphan ? ", orphan" : ""}): ${paths || "no paths"}`;
+		})
+		.join("\n")}`;
 }
 
 function formatDuration(ms: number): string {

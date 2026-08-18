@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { execFile, spawn } from "node:child_process";
-import { mkdir, rm } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
+import { mkdir, readdir, readFile, rm } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { JsonlRpcClient, RpcWorkerError } from "./rpc-client.ts";
 import type { WorkerProcessLike } from "./rpc-client.ts";
@@ -140,6 +140,29 @@ export interface GitResult {
 	stdout: string;
 	stderr: string;
 	exitCode: number;
+}
+
+export interface CleanWorkersRequest {
+	repositoryCwd: string;
+	sessionDir: string;
+	taskId?: string;
+	dryRun?: boolean;
+	/** Discover persisted delegate artifacts that are not in this supervisor. */
+	includeOrphans?: boolean;
+}
+
+export interface CleanResource {
+	taskId: string;
+	status: WorkerStatus | "orphan";
+	sessionFile?: string;
+	worktree?: string;
+	branch?: string;
+	orphan?: boolean;
+}
+
+export interface CleanResult {
+	dryRun: boolean;
+	resources: CleanResource[];
 }
 
 export interface GitRunner {
@@ -308,6 +331,74 @@ export class WorkerSupervisor {
 	}
 
 	/**
+	 * Remove terminal worker resources without touching the parent worktree.
+	 * Explicit task IDs may refer to persisted artifacts from an earlier
+	 * supervisor process when includeOrphans is enabled. An all-workers clean
+	 * only selects terminal in-memory workers by default; active workers are
+	 * never implicitly stopped.
+	 */
+	async clean(request: CleanWorkersRequest): Promise<CleanResult> {
+		if (!request.repositoryCwd) throw new WorkerSupervisorError("A repository cwd is required.");
+		if (!request.sessionDir) throw new WorkerSupervisorError("A session directory is required.");
+		const repositoryRoot = await this.repositoryRoot(request.repositoryCwd);
+		const worktreeRoot = resolve(this.worktreeRoot ?? join(dirname(repositoryRoot), `.${basename(repositoryRoot)}-delegate-worktrees`));
+		const discovered = await this.discoverCleanResources(repositoryRoot, worktreeRoot, request.sessionDir);
+
+		for (const worker of this.workers.values()) {
+			const existing = discovered.get(worker.state.taskId);
+			discovered.set(worker.state.taskId, {
+				taskId: worker.state.taskId,
+				status: worker.state.status,
+				sessionFile: worker.state.sessionFile || existing?.sessionFile,
+				worktree: worker.state.worktree || existing?.worktree,
+				branch: worker.state.branch || existing?.branch,
+				orphan: false,
+			});
+		}
+
+		let resources: CleanResource[];
+		if (request.taskId) {
+			const worker = this.workers.get(request.taskId);
+			if (worker && isCleanupBlocked(worker.state.status)) {
+				throw new WorkerSupervisorError(`Worker ${request.taskId} is ${worker.state.status} and cannot be cleaned while active.`);
+			}
+			const resource = discovered.get(request.taskId);
+			if (!resource) throw new WorkerSupervisorError(`No terminal delegated worker or artifact with task ID ${request.taskId}`);
+			if (resource.orphan && !request.includeOrphans) {
+				throw new WorkerSupervisorError(`Worker ${request.taskId} is not managed by this supervisor; set includeOrphans to clean its artifacts.`);
+			}
+			resources = [resource];
+		} else {
+			resources = [...discovered.values()].filter((resource) => {
+				const worker = this.workers.get(resource.taskId);
+				if (worker) return !isCleanupBlocked(worker.state.status);
+				return request.includeOrphans === true && resource.orphan === true;
+			});
+		}
+
+		for (const resource of resources) this.validateCleanResource(resource, worktreeRoot, request.sessionDir);
+		const result = { dryRun: request.dryRun === true, resources: resources.map((resource) => ({ ...resource })) };
+		if (result.dryRun) return result;
+
+		for (const resource of resources) {
+			const worker = this.workers.get(resource.taskId);
+			if (worker) {
+				if (isCleanupBlocked(worker.state.status)) {
+					throw new WorkerSupervisorError(`Worker ${resource.taskId} became active while cleaning.`);
+				}
+				await this.terminateWorker(worker);
+				this.workers.delete(resource.taskId);
+			}
+			await this.removeCleanResource(repositoryRoot, resource, worktreeRoot, request.sessionDir);
+		}
+		if (resources.length > 0) {
+			this.onStateChange?.();
+			this.resolveWaiters();
+		}
+		return result;
+	}
+
+	/**
 	 * Wait until the given workers (all of them by default) reach a terminal
 	 * status, then return their final states. Resolves early with the current
 	 * states when the parent aborts the wait via `signal`. When `onProgress`
@@ -403,6 +494,86 @@ export class WorkerSupervisor {
 		const worker = this.workers.get(taskId);
 		if (!worker) throw new WorkerSupervisorError(`No worker with task ID ${taskId}`);
 		return worker;
+	}
+
+	private async repositoryRoot(repositoryCwd: string): Promise<string> {
+		const result = await this.git.run(["rev-parse", "--show-toplevel"], repositoryCwd);
+		if (result.exitCode !== 0) throw new GitCommandError(["rev-parse", "--show-toplevel"], result);
+		return resolve(result.stdout.trim());
+	}
+
+	private async discoverCleanResources(repositoryRoot: string, worktreeRoot: string, sessionDir: string): Promise<Map<string, CleanResource>> {
+		const resources = new Map<string, CleanResource>();
+		const add = (resource: CleanResource): void => {
+			const existing = resources.get(resource.taskId);
+			resources.set(resource.taskId, {
+				taskId: resource.taskId,
+				status: existing?.status ?? resource.status,
+				sessionFile: resource.sessionFile ?? existing?.sessionFile,
+				worktree: resource.worktree ?? existing?.worktree,
+				branch: resource.branch ?? existing?.branch,
+				orphan: existing?.orphan ?? resource.orphan ?? true,
+			});
+		};
+
+		for (const entry of await delegateWorktreeDirectories(worktreeRoot)) {
+			const taskId = taskIdFromName(entry.name);
+			if (taskId) add({ taskId, status: "orphan", worktree: resolve(entry.path), orphan: true });
+		}
+
+		const worktreeResult = await this.git.run(["worktree", "list", "--porcelain"], repositoryRoot);
+		if (worktreeResult.exitCode !== 0) throw new GitCommandError(["worktree", "list", "--porcelain"], worktreeResult);
+		for (const worktree of parseWorktrees(worktreeResult.stdout)) {
+			const taskId = taskIdFromBranch(worktree.branch) ?? taskIdFromName(basename(worktree.path));
+			if (!taskId || !isWithinDirectory(worktreeRoot, worktree.path)) continue;
+			add({ taskId, status: "orphan", worktree: worktree.path, branch: worktree.branch, orphan: true });
+		}
+
+		const branchResult = await this.git.run(["for-each-ref", "--format=%(refname:short)", "refs/heads/subagent"], repositoryRoot);
+		if (branchResult.exitCode !== 0) throw new GitCommandError(["for-each-ref", "--format=%(refname:short)", "refs/heads/subagent"], branchResult);
+		for (const branch of branchResult.stdout.split("\n").map((line) => line.trim()).filter(Boolean)) {
+			const taskId = taskIdFromBranch(branch);
+			if (taskId) add({ taskId, status: "orphan", branch, orphan: true });
+		}
+
+		for (const session of await findDelegateSessions(sessionDir)) {
+			add({ taskId: session.taskId, status: "orphan", sessionFile: session.path, orphan: true });
+		}
+		return resources;
+	}
+
+	private validateCleanResource(resource: CleanResource, worktreeRoot: string, sessionDir: string): void {
+		if (!isTaskId(resource.taskId)) throw new WorkerSupervisorError(`Refusing to clean an unrecognized task ID: ${resource.taskId}`);
+		if (resource.branch && resource.branch !== `subagent/${resource.taskId}`) {
+			throw new WorkerSupervisorError(`Refusing to clean unexpected branch for ${resource.taskId}: ${resource.branch}`);
+		}
+		if (resource.worktree && !isWithinDirectory(worktreeRoot, resolve(resource.worktree))) {
+			throw new WorkerSupervisorError(`Refusing to clean worktree outside the delegate root: ${resource.worktree}`);
+		}
+		if (resource.sessionFile && !isWithinOrEqual(resolve(sessionDir), resolve(resource.sessionFile))) {
+			throw new WorkerSupervisorError(`Refusing to clean session outside the session directory: ${resource.sessionFile}`);
+		}
+	}
+
+	private async removeCleanResource(repositoryRoot: string, resource: CleanResource, worktreeRoot: string, sessionDir: string): Promise<void> {
+		this.validateCleanResource(resource, worktreeRoot, sessionDir);
+		if (resource.worktree) {
+			const result = await this.git.run(["worktree", "remove", "--force", resolve(resource.worktree)], repositoryRoot);
+			if (result.exitCode !== 0) {
+				if (/not a working tree|not registered/i.test(`${result.stderr} ${result.stdout}`)) {
+					await rm(resolve(resource.worktree), { recursive: true, force: true });
+				} else {
+					throw new GitCommandError(["worktree", "remove", "--force", resolve(resource.worktree)], result);
+				}
+			}
+		}
+		if (resource.branch) {
+			const result = await this.git.run(["branch", "-D", resource.branch], repositoryRoot);
+			if (result.exitCode !== 0 && !/not found|does not exist/i.test(`${result.stderr} ${result.stdout}`)) {
+				throw new GitCommandError(["branch", "-D", resource.branch], result);
+			}
+		}
+		if (resource.sessionFile) await rm(resolve(resource.sessionFile), { force: true });
 	}
 
 	private transition(worker: WorkerHandle, status: WorkerStatus): void {
@@ -763,8 +934,116 @@ export class WorkerSupervisor {
 	}
 }
 
+interface ParsedWorktree {
+	path: string;
+	branch?: string;
+}
+
+interface DelegateSession {
+	taskId: string;
+	path: string;
+}
+
+const TASK_ID_PATTERN = /^task-[a-f0-9-]+$/;
+
+function isTaskId(value: string): boolean {
+	return TASK_ID_PATTERN.test(value);
+}
+
+function taskIdFromName(value: string): string | undefined {
+	return isTaskId(value) ? value : undefined;
+}
+
+function taskIdFromBranch(value: string | undefined): string | undefined {
+	if (!value) return undefined;
+	const prefix = "subagent/";
+	if (!value.startsWith(prefix)) return undefined;
+	return taskIdFromName(value.slice(prefix.length));
+}
+
+function isWithinDirectory(root: string, candidate: string): boolean {
+	const path = relative(resolve(root), resolve(candidate));
+	return path !== "" && !isAbsolute(path) && path !== ".." && !path.startsWith("../");
+}
+
+function isWithinOrEqual(root: string, candidate: string): boolean {
+	const path = relative(resolve(root), resolve(candidate));
+	return path === "" || (!isAbsolute(path) && path !== ".." && !path.startsWith("../"));
+}
+
+function parseWorktrees(output: string): ParsedWorktree[] {
+	const worktrees: ParsedWorktree[] = [];
+	let current: ParsedWorktree | undefined;
+	for (const line of output.split("\n")) {
+		if (line.startsWith("worktree ")) {
+			current = { path: resolve(line.slice("worktree ".length)) };
+			worktrees.push(current);
+		} else if (current && line.startsWith("branch refs/heads/")) {
+			current.branch = line.slice("branch refs/heads/".length);
+		}
+	}
+	return worktrees;
+}
+
+async function delegateWorktreeDirectories(root: string): Promise<Array<{ name: string; path: string }>> {
+	try {
+		return (await readdir(root, { withFileTypes: true }))
+			.filter((entry) => entry.isDirectory() && !entry.isSymbolicLink())
+			.map((entry) => ({ name: entry.name, path: join(root, entry.name) }));
+	} catch {
+		return [];
+	}
+}
+
+async function findDelegateSessions(root: string): Promise<DelegateSession[]> {
+	const sessions: DelegateSession[] = [];
+	const visit = async (directory: string): Promise<void> => {
+		let entries;
+		try {
+			entries = await readdir(directory, { withFileTypes: true });
+		} catch {
+			return;
+		}
+		for (const entry of entries) {
+			if (entry.isSymbolicLink()) continue;
+			const path = join(directory, entry.name);
+			if (entry.isDirectory()) {
+				await visit(path);
+				continue;
+			}
+			if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
+			try {
+				const content = (await readFile(path, "utf8")).slice(0, 128 * 1024);
+				for (const line of content.split("\n")) {
+					let value: unknown;
+					try {
+						value = JSON.parse(line);
+					} catch {
+						continue;
+					}
+					if (typeof value !== "object" || value === null) continue;
+					const entryValue = value as { type?: unknown; name?: unknown };
+					if (entryValue.type !== "session_info" || typeof entryValue.name !== "string") continue;
+					const taskId = taskIdFromBranch(entryValue.name);
+					if (taskId) sessions.push({ taskId, path: resolve(path) });
+					break;
+				}
+			} catch {
+				// A partially written or unreadable session must not block cleanup of
+				// other recognized delegate artifacts.
+			}
+		}
+	};
+	await visit(resolve(root));
+	return sessions;
+}
+
 function isActive(status: WorkerStatus): boolean {
 	return status === "starting" || status === "running" || status === "wrapping up";
+}
+
+function isCleanupBlocked(status: WorkerStatus): boolean {
+	return !TERMINAL_WORKER_STATUSES.includes(status);
 }
 
 function countMessages(value: unknown): number {
