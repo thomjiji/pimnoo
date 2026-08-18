@@ -1,6 +1,6 @@
-import { background, foreground, shade, stripBackground, type RGB } from "./colors.ts";
+import { background, foreground, shade, stripBackground, type RGB, type ThemeBg } from "./colors.ts";
 
-export type BlockStyle = "half" | "full" | "deep" | "outline" | "off";
+export type BlockStyle = "half" | "full" | "deep" | "outline" | "rail" | "spotlight" | "off";
 export type ActiveBlockStyle = Exclude<BlockStyle, "off">;
 
 export type BlockStyleContext = {
@@ -9,6 +9,7 @@ export type BlockStyleContext = {
 	faceColor: RGB;
 	nearColor: RGB;
 	farColor: RGB;
+	semanticName: ThemeBg;
 };
 
 type BlockStyleDefinition = {
@@ -63,6 +64,18 @@ function renderOutline(lines: string[], faceWidth: number, border: RGB): string[
 	return [top, ...middle, bottom];
 }
 
+function renderRail(lines: string[], accent: RGB): string[] {
+	return lines.map((line) => foreground("┃", accent) + stripBackground(line));
+}
+
+function renderSpotlight(lines: string[], faceColor: RGB, semanticName: ThemeBg): string[] {
+	const active = semanticName === "toolPendingBg";
+	const accent = shade(faceColor, active ? 1.25 : 0.78);
+	const rail = active ? "┃" : "│";
+	const content = active ? lines : lines.map(stripBackground);
+	return content.map((line) => foreground(rail, accent) + line);
+}
+
 /**
  * The style registry is the internal seam for new block treatments. Each style
  * owns its width reservation and line geometry; Box patching stays unaware of
@@ -84,6 +97,14 @@ export const BLOCK_STYLES: Record<ActiveBlockStyle, BlockStyleDefinition> = {
 	outline: {
 		reservedWidth: 2,
 		render: ({ lines, faceWidth, faceColor }) => renderOutline(lines, faceWidth, shade(faceColor, 1.25)),
+	},
+	rail: {
+		reservedWidth: 1,
+		render: ({ lines, faceColor }) => renderRail(lines, shade(faceColor, 1.15)),
+	},
+	spotlight: {
+		reservedWidth: 1,
+		render: ({ lines, faceColor, semanticName }) => renderSpotlight(lines, faceColor, semanticName),
 	},
 };
 

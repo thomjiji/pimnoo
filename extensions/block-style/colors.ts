@@ -1,7 +1,12 @@
 import { Theme } from "@earendil-works/pi-coding-agent";
 
-type ThemeBg = "userMessageBg" | "customMessageBg" | "toolPendingBg" | "toolSuccessBg" | "toolErrorBg";
+export type ThemeBg = "userMessageBg" | "customMessageBg" | "toolPendingBg" | "toolSuccessBg" | "toolErrorBg";
 export type RGB = { r: number; g: number; b: number };
+
+export type SemanticBackground = {
+	name: ThemeBg;
+	color: RGB;
+};
 
 type RuntimeBox = {
 	bgFn?: (text: string) => string;
@@ -87,18 +92,18 @@ export function stripBackground(ansi: string): string {
 }
 
 /** Observe the semantic Theme key used by a Box without relying on callback source or color equality. */
-export function semanticBackgroundColor(box: RuntimeBox): RGB | undefined {
+export function semanticBackground(box: RuntimeBox): SemanticBackground | undefined {
 	if (!box.bgFn) return undefined;
 
 	const originalThemeBg = Theme.prototype.bg;
-	const semanticOutputs = new Set<string>();
+	const semanticOutputs = new Map<string, ThemeBg>();
 	const observedThemeBg = function observeSemanticBackground(
 		this: Theme,
 		name: Parameters<Theme["bg"]>[0],
 		text: string,
 	): string {
 		const output = originalThemeBg.call(this, name, text);
-		if (BLOCK_BACKGROUNDS.includes(name as ThemeBg)) semanticOutputs.add(output);
+		if (BLOCK_BACKGROUNDS.includes(name as ThemeBg)) semanticOutputs.set(output, name as ThemeBg);
 		return output;
 	};
 
@@ -109,5 +114,7 @@ export function semanticBackgroundColor(box: RuntimeBox): RGB | undefined {
 	} finally {
 		Theme.prototype.bg = originalThemeBg;
 	}
-	return semanticOutputs.has(renderedSample) ? parseBackgroundColor(renderedSample) : undefined;
+	const name = semanticOutputs.get(renderedSample);
+	const color = parseBackgroundColor(renderedSample);
+	return name && color ? { name, color } : undefined;
 }

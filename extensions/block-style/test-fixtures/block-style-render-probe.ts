@@ -3,13 +3,14 @@ import { Box, Text, visibleWidth } from "@earendil-works/pi-tui";
 
 const probeTheme = new Theme(
 	{ text: "", thinkingXhigh: "" } as ConstructorParameters<typeof Theme>[0],
-	{ selectedBg: 0, userMessageBg: 22 } as ConstructorParameters<typeof Theme>[1],
+	{ selectedBg: 0, userMessageBg: 22, toolPendingBg: 214 } as ConstructorParameters<typeof Theme>[1],
 	"256color",
 );
 const semanticBackgroundName = "userMessageBg";
 const userMessageBackground = (text: string): string => probeTheme.bg(semanticBackgroundName, text);
+const pendingToolBackground = (text: string): string => probeTheme.bg("toolPendingBg", text);
 
-type BlockStyle = "half" | "full" | "deep" | "outline" | "off";
+type BlockStyle = "half" | "full" | "deep" | "outline" | "rail" | "spotlight" | "off";
 
 /** Regression probe: the real Box patch renders styles without changing terminal width. */
 export default function blockStyleRenderProbe(pi: ExtensionAPI): void {
@@ -62,12 +63,38 @@ function runBlockStyleProbe(): void {
 			throw new Error("block-style outline did not remove the semantic face fill");
 		}
 
+		patch.style = "rail";
+		const railBox = new Box(1, 1, (text) => userMessageBackground(text));
+		railBox.addChild(new Text("rail", 0, 0));
+		const railLines = railBox.render(40);
+		if (railLines.length !== 3 || railLines.some((line) => visibleWidth(line) !== 40)) {
+			throw new Error("block-style rail did not preserve terminal width");
+		}
+		if (!railLines[1]?.includes("┃") || railLines.some((line) => line.includes("\x1b[48;"))) {
+			throw new Error("block-style rail did not render a fill-free semantic rail");
+		}
+
+		patch.style = "spotlight";
+		const quietSpotlightBox = new Box(1, 1, (text) => userMessageBackground(text));
+		quietSpotlightBox.addChild(new Text("quiet", 0, 0));
+		const quietSpotlightLines = quietSpotlightBox.render(40);
+		if (!quietSpotlightLines[1]?.includes("│") || quietSpotlightLines.some((line) => line.includes("\x1b[48;"))) {
+			throw new Error("block-style spotlight did not quiet completed blocks");
+		}
+		const activeSpotlightBox = new Box(1, 1, (text) => pendingToolBackground(text));
+		activeSpotlightBox.addChild(new Text("active", 0, 0));
+		const activeSpotlightLines = activeSpotlightBox.render(40);
+		if (!activeSpotlightLines[1]?.includes("┃") || !activeSpotlightLines.some((line) => line.includes("\x1b[48;"))) {
+			throw new Error("block-style spotlight did not emphasize pending blocks");
+		}
+
 		const ordinaryBox = new Box(1, 1, (text) => `\x1b[48;5;22m${text}\x1b[49m`);
 		ordinaryBox.addChild(new Text("ordinary-layout-box", 0, 0));
 		if (ordinaryBox.render(40).length !== 3) {
 			throw new Error("block-style changed a non-semantic Box");
 		}
 
+		patch.style = "outline";
 		const nativeNarrowBox = new Box(1, 1, (text) => `\x1b[48;5;22m${text}\x1b[49m`);
 		nativeNarrowBox.addChild(new Text("outline", 0, 0));
 		if (JSON.stringify(outlineBox.render(4)) !== JSON.stringify(nativeNarrowBox.render(4))) {

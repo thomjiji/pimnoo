@@ -2,7 +2,7 @@
  * Apply terminal-friendly styles to Pi's semantic message blocks.
  * Switch at runtime with:
  *
- *   /block-style half|full|deep|outline|off
+ *   /block-style half|full|deep|outline|rail|spotlight|off
  *
  * This intentionally patches the shared Box rendering seam. It only touches
  * boxes whose callbacks explicitly request Pi's user/custom/tool message
@@ -11,7 +11,7 @@
 
 import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Box } from "@earendil-works/pi-tui";
-import { semanticBackgroundColor, shade } from "./colors.ts";
+import { semanticBackground, shade } from "./colors.ts";
 import { BLOCK_STYLES, isBlockStyle, type BlockStyle } from "./styles.ts";
 
 type PatchState = {
@@ -38,8 +38,8 @@ function installPatch(owner: object): PatchState {
 		const style = state.style;
 		if (style === "off") return originalRender.call(this, width);
 
-		const faceColor = semanticBackgroundColor(this as { bgFn?: (text: string) => string });
-		if (!faceColor) return originalRender.call(this, width);
+		const semantic = semanticBackground(this as { bgFn?: (text: string) => string });
+		if (!semantic) return originalRender.call(this, width);
 
 		const definition = BLOCK_STYLES[style];
 		if (width <= definition.reservedWidth + 2) return originalRender.call(this, width);
@@ -51,9 +51,10 @@ function installPatch(owner: object): PatchState {
 		return definition.render({
 			lines,
 			faceWidth,
-			faceColor,
-			nearColor: shade(faceColor, 0.58),
-			farColor: shade(faceColor, 0.32),
+			faceColor: semantic.color,
+			nearColor: shade(semantic.color, 0.58),
+			farColor: shade(semantic.color, 0.32),
+			semanticName: semantic.name,
 		});
 	};
 	state.patchedRender = patchedRender;
@@ -73,11 +74,11 @@ export default function blockStyle(pi: ExtensionAPI): void {
 	const state = installPatch(owner);
 
 	pi.registerCommand("block-style", {
-		description: "Switch semantic block style (half, full, deep, outline, off)",
+		description: "Switch semantic block style (half, full, deep, outline, rail, spotlight, off)",
 		handler: (args, ctx) => {
 			const requested = args.trim().toLowerCase();
 			if (requested && !isBlockStyle(requested)) {
-				ctx.ui.notify("Usage: /block-style [half|full|deep|outline|off]", "warning");
+				ctx.ui.notify("Usage: /block-style [half|full|deep|outline|rail|spotlight|off]", "warning");
 				return;
 			}
 			if (isBlockStyle(requested)) state.style = requested;

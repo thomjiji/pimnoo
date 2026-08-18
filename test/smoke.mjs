@@ -382,6 +382,8 @@ async function assertStandaloneBlockStyleLoads(tempRoot) {
 		{ id: "commands", type: "get_commands" },
 		{ id: "probe", type: "prompt", message: "/block-style-render-probe" },
 		{ id: "outline", type: "prompt", message: "/block-style outline" },
+		{ id: "rail", type: "prompt", message: "/block-style rail" },
+		{ id: "spotlight", type: "prompt", message: "/block-style spotlight" },
 		{ id: "invalid", type: "prompt", message: "/block-style hard" },
 	], ["-e", probePath]);
 	assert.equal(rpc.code, 0, `Standalone block-style failed to load:\n${rpc.stderr}\n${rpc.stdout}`);
@@ -391,9 +393,13 @@ async function assertStandaloneBlockStyleLoads(tempRoot) {
 	assert.equal(commands.some((command) => command.name === "autotitle"), false);
 	assert.equal(response(rpc.lines, "probe")?.success, true, `Standalone block-style probe failed:\n${rpc.stdout}`);
 	assert.equal(response(rpc.lines, "outline")?.success, true, `Standalone block-style outline mode failed:\n${rpc.stdout}`);
+	assert.equal(response(rpc.lines, "rail")?.success, true, `Standalone block-style rail mode failed:\n${rpc.stdout}`);
+	assert.equal(response(rpc.lines, "spotlight")?.success, true, `Standalone block-style spotlight mode failed:\n${rpc.stdout}`);
 	assert.equal(response(rpc.lines, "invalid")?.success, true, `Standalone block-style invalid mode failed:\n${rpc.stdout}`);
 	assert.equal(rpc.lines.some((line) => line.method === "notify" && line.message === "Block style: outline"), true);
-	assert.equal(rpc.lines.some((line) => line.method === "notify" && line.message === "Usage: /block-style [half|full|deep|outline|off]"), true);
+	assert.equal(rpc.lines.some((line) => line.method === "notify" && line.message === "Block style: rail"), true);
+	assert.equal(rpc.lines.some((line) => line.method === "notify" && line.message === "Block style: spotlight"), true);
+	assert.equal(rpc.lines.some((line) => line.method === "notify" && line.message === "Usage: /block-style [half|full|deep|outline|rail|spotlight|off]"), true);
 	const blockStyle = commands.find((command) => command.name === "block-style");
 	assert.equal(blockStyle?.sourceInfo.origin, "package");
 	assert.match(blockStyle?.sourceInfo.path.replaceAll("\\", "/"), /extensions\/block-style\/index\.ts$/);
