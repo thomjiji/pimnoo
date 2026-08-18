@@ -368,11 +368,11 @@ async function assertStandaloneExtensionLoads(tempRoot) {
 	assert.match(autotitle?.sourceInfo.path.replaceAll("\\", "/"), /extensions\/auto-title\/index\.ts$/);
 }
 
-async function assertStandaloneBlockDepthLoads(tempRoot) {
-	const agentDir = join(tempRoot, "agent-standalone-block-depth");
-	const projectDir = join(tempRoot, "project-standalone-block-depth");
-	const extensionDir = join(root, "extensions", "block-depth");
-	const probePath = join(root, "extensions", "block-depth", "test-fixtures", "block-depth-render-probe.ts");
+async function assertStandaloneBlockStyleLoads(tempRoot) {
+	const agentDir = join(tempRoot, "agent-standalone-block-style");
+	const projectDir = join(tempRoot, "project-standalone-block-style");
+	const extensionDir = join(root, "extensions", "block-style");
+	const probePath = join(root, "extensions", "block-style", "test-fixtures", "block-style-render-probe.ts");
 	await mkdir(projectDir, { recursive: true });
 	await run(PI_BIN, ["install", extensionDir], {
 		cwd: projectDir,
@@ -380,23 +380,23 @@ async function assertStandaloneBlockDepthLoads(tempRoot) {
 	});
 	const rpc = await runRpc(agentDir, projectDir, [
 		{ id: "commands", type: "get_commands" },
-		{ id: "probe", type: "prompt", message: "/block-depth-render-probe" },
-		{ id: "full", type: "prompt", message: "/block-depth full" },
-		{ id: "hard", type: "prompt", message: "/block-depth hard" },
+		{ id: "probe", type: "prompt", message: "/block-style-render-probe" },
+		{ id: "outline", type: "prompt", message: "/block-style outline" },
+		{ id: "invalid", type: "prompt", message: "/block-style hard" },
 	], ["-e", probePath]);
-	assert.equal(rpc.code, 0, `Standalone block-depth failed to load:\n${rpc.stderr}\n${rpc.stdout}`);
-	assert.equal(rpc.lines.some((line) => line.type === "extension_error"), false, `Standalone block-depth error:\n${rpc.stdout}`);
+	assert.equal(rpc.code, 0, `Standalone block-style failed to load:\n${rpc.stderr}\n${rpc.stdout}`);
+	assert.equal(rpc.lines.some((line) => line.type === "extension_error"), false, `Standalone block-style error:\n${rpc.stdout}`);
 	const commands = commandList(rpc);
-	assert.equal(commands.filter((command) => command.name === "block-depth").length, 1);
+	assert.equal(commands.filter((command) => command.name === "block-style").length, 1);
 	assert.equal(commands.some((command) => command.name === "autotitle"), false);
-	assert.equal(response(rpc.lines, "probe")?.success, true, `Standalone block-depth probe failed:\n${rpc.stdout}`);
-	assert.equal(response(rpc.lines, "full")?.success, true, `Standalone block-depth full mode failed:\n${rpc.stdout}`);
-	assert.equal(response(rpc.lines, "hard")?.success, true, `Standalone block-depth invalid mode failed:\n${rpc.stdout}`);
-	assert.equal(rpc.lines.some((line) => line.method === "notify" && line.message === "Block depth: full"), true);
-	assert.equal(rpc.lines.some((line) => line.method === "notify" && line.message === "Usage: /block-depth [half|full|deep|off]"), true);
-	const blockDepth = commands.find((command) => command.name === "block-depth");
-	assert.equal(blockDepth?.sourceInfo.origin, "package");
-	assert.match(blockDepth?.sourceInfo.path.replaceAll("\\", "/"), /extensions\/block-depth\/index\.ts$/);
+	assert.equal(response(rpc.lines, "probe")?.success, true, `Standalone block-style probe failed:\n${rpc.stdout}`);
+	assert.equal(response(rpc.lines, "outline")?.success, true, `Standalone block-style outline mode failed:\n${rpc.stdout}`);
+	assert.equal(response(rpc.lines, "invalid")?.success, true, `Standalone block-style invalid mode failed:\n${rpc.stdout}`);
+	assert.equal(rpc.lines.some((line) => line.method === "notify" && line.message === "Block style: outline"), true);
+	assert.equal(rpc.lines.some((line) => line.method === "notify" && line.message === "Usage: /block-style [half|full|deep|outline|off]"), true);
+	const blockStyle = commands.find((command) => command.name === "block-style");
+	assert.equal(blockStyle?.sourceInfo.origin, "package");
+	assert.match(blockStyle?.sourceInfo.path.replaceAll("\\", "/"), /extensions\/block-style\/index\.ts$/);
 }
 
 async function assertLegacyCopiesAreRejected(tempRoot) {
@@ -497,7 +497,7 @@ const tempRoot = await mkdtemp(join(tmpdir(), "pimono-smoke-"));
 try {
 	await assertCleanPackageLoads(tempRoot);
 	await assertStandaloneExtensionLoads(tempRoot);
-	await assertStandaloneBlockDepthLoads(tempRoot);
+	await assertStandaloneBlockStyleLoads(tempRoot);
 	await assertLegacyCopiesAreRejected(tempRoot);
 	await assertLegacyCleanupScript(tempRoot);
 	await assertAutoTitleBehavior(tempRoot);

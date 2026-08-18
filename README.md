@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | `auto-title` | `extensions/auto-title/index.ts` | 为没有手动名称的 session 生成英文短标题 |
 | `bash-readable` | `extensions/bash-readable/index.ts` | 只改变 Bash 工具的显示格式，不改变执行行为 |
-| `block-depth` | `extensions/block-depth/index.ts` | 为语义背景块增加可切换的深度效果 |
+| `block-style` | `extensions/block-style/index.ts` | 为语义背景块增加可切换的样式 |
 | `delegate` | `extensions/delegate/index.ts` | 在独立 Git worktree 中启动 headless Pi RPC worker |
 | `export-md` | `extensions/export-md/index.ts` | 通过 `/export-md` 导出只包含提示和回复的 Markdown |
 | `no-italic` | `extensions/no-italic/index.ts` | 禁用 TUI 的 italic 显示样式 |

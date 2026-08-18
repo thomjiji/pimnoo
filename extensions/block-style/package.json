@@ -1,8 +1,8 @@
 {
-  "name": "pimono-block-depth",
+  "name": "pimono-block-style",
   "version": "0.1.0",
   "private": true,
-  "description": "Add switchable depth effects to Pi semantic message blocks",
+  "description": "Apply switchable styles to Pi semantic message blocks",
   "keywords": ["pi-package"],
   "license": "MIT",
   "type": "module",
