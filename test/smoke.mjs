@@ -406,7 +406,6 @@ async function assertLegacyCopiesAreRejected(tempRoot) {
 	await mkdir(projectDir, { recursive: true });
 	await mkdir(legacyDir, { recursive: true });
 	await cp(join(root, "extensions", "auto-title", "index.ts"), join(legacyDir, "index.ts"));
-	await cp(join(root, "extensions", "auto-title", "helpers.ts"), join(legacyDir, "helpers.ts"));
 	await writeFile(join(legacyDir, "package.json"), JSON.stringify({ pi: { extensions: ["./index.ts"] } }));
 	await run(PI_BIN, ["install", root], { cwd: projectDir, env: { ...piEnv, PI_CODING_AGENT_DIR: agentDir, PI_OFFLINE: "1" } });
 	const rpc = await runRpc(agentDir, projectDir, [{ id: "commands", type: "get_commands" }]);
