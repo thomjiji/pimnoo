@@ -381,6 +381,8 @@ async function assertStandaloneBlockDepthLoads(tempRoot) {
 	const rpc = await runRpc(agentDir, projectDir, [
 		{ id: "commands", type: "get_commands" },
 		{ id: "probe", type: "prompt", message: "/block-depth-render-probe" },
+		{ id: "full", type: "prompt", message: "/block-depth full" },
+		{ id: "hard", type: "prompt", message: "/block-depth hard" },
 	], ["-e", probePath]);
 	assert.equal(rpc.code, 0, `Standalone block-depth failed to load:\n${rpc.stderr}\n${rpc.stdout}`);
 	assert.equal(rpc.lines.some((line) => line.type === "extension_error"), false, `Standalone block-depth error:\n${rpc.stdout}`);
@@ -388,6 +390,10 @@ async function assertStandaloneBlockDepthLoads(tempRoot) {
 	assert.equal(commands.filter((command) => command.name === "block-depth").length, 1);
 	assert.equal(commands.some((command) => command.name === "autotitle"), false);
 	assert.equal(response(rpc.lines, "probe")?.success, true, `Standalone block-depth probe failed:\n${rpc.stdout}`);
+	assert.equal(response(rpc.lines, "full")?.success, true, `Standalone block-depth full mode failed:\n${rpc.stdout}`);
+	assert.equal(response(rpc.lines, "hard")?.success, true, `Standalone block-depth invalid mode failed:\n${rpc.stdout}`);
+	assert.equal(rpc.lines.some((line) => line.method === "notify" && line.message === "Block depth: full"), true);
+	assert.equal(rpc.lines.some((line) => line.method === "notify" && line.message === "Usage: /block-depth [half|full|deep|off]"), true);
 	const blockDepth = commands.find((command) => command.name === "block-depth");
 	assert.equal(blockDepth?.sourceInfo.origin, "package");
 	assert.match(blockDepth?.sourceInfo.path.replaceAll("\\", "/"), /extensions\/block-depth\/index\.ts$/);

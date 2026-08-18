@@ -20,7 +20,7 @@ export default function blockDepthRenderProbe(pi: ExtensionAPI): void {
 function runBlockDepthProbe(): void {
 	const patch = (Box.prototype as typeof Box.prototype & Record<PropertyKey, unknown>)[
 		Symbol.for("pimnoo.block-depth")
-	] as { mode: "hard" | "half" | "deep" | "off" } | undefined;
+	] as { mode: "half" | "full" | "deep" | "off" } | undefined;
 	if (!patch) throw new Error("block-depth patch marker is missing");
 	if (patch.mode !== "half") throw new Error("block-depth did not default to half mode");
 
@@ -34,16 +34,16 @@ function runBlockDepthProbe(): void {
 		throw new Error("block-depth half mode did not render proportional cut-out corners");
 	}
 
-	patch.mode = "hard";
+	patch.mode = "full";
 	try {
 		const box = new Box(1, 1, (text) => userMessageBackground(text));
 		box.addChild(new Text("block-depth-render-probe", 0, 0));
 		const lines = box.render(40);
 		if (lines.length !== 4 || lines.some((line) => visibleWidth(line) !== 40)) {
-			throw new Error("block-depth hard mode did not render a width-preserving shadow");
+			throw new Error("block-depth full mode did not render a width-preserving shadow");
 		}
 		if (!/\x1b\[49m {3}$/.test(lines[0] ?? "") || !lines.at(-1)?.startsWith("   ")) {
-			throw new Error("block-depth hard mode did not remove the top-right depth square");
+			throw new Error("block-depth full mode did not remove the top-right depth square");
 		}
 
 		const ordinaryBox = new Box(1, 1, (text) => `\x1b[48;5;22m${text}\x1b[49m`);

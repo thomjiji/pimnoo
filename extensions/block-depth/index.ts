@@ -2,7 +2,7 @@
  * Add terminal-friendly depth treatments to Pi's semantic background blocks.
  * Switch at runtime with:
  *
- *   /block-depth hard|half|deep|off
+ *   /block-depth half|full|deep|off
  *
  * This intentionally patches the shared Box rendering seam. It only touches
  * boxes whose callbacks explicitly request Pi's user/custom/tool message
@@ -12,7 +12,7 @@
 import { Theme, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Box } from "@earendil-works/pi-tui";
 
-type DepthMode = "hard" | "half" | "deep" | "off";
+type DepthMode = "half" | "full" | "deep" | "off";
 type ThemeBg = "userMessageBg" | "customMessageBg" | "toolPendingBg" | "toolSuccessBg" | "toolErrorBg";
 type RGB = { r: number; g: number; b: number };
 
@@ -36,8 +36,8 @@ const BLOCK_BACKGROUNDS: ThemeBg[] = [
 	"toolSuccessBg",
 	"toolErrorBg",
 ];
-const DEPTH_MODES = new Set<DepthMode>(["hard", "half", "deep", "off"]);
-const HARD_SIDE_WIDTH = 3;
+const DEPTH_MODES = new Set<DepthMode>(["half", "full", "deep", "off"]);
+const FULL_SIDE_WIDTH = 3;
 const HALF_SIDE_WIDTH = 2;
 const HALF_TOP_CUTOUT = "▄▖";
 
@@ -135,13 +135,13 @@ function isDepthMode(value: string): value is DepthMode {
 	return DEPTH_MODES.has(value as DepthMode);
 }
 
-function renderHard(lines: string[], faceWidth: number, shadow: RGB): string[] {
+function renderFull(lines: string[], faceWidth: number, shadow: RGB): string[] {
 	const [firstLine, ...remainingLines] = lines;
 	if (!firstLine) return lines;
 	return [
-		firstLine + " ".repeat(HARD_SIDE_WIDTH),
-		...remainingLines.map((line) => line + background(" ".repeat(HARD_SIDE_WIDTH), shadow)),
-		" ".repeat(HARD_SIDE_WIDTH) + background(" ".repeat(faceWidth), shadow),
+		firstLine + " ".repeat(FULL_SIDE_WIDTH),
+		...remainingLines.map((line) => line + background(" ".repeat(FULL_SIDE_WIDTH), shadow)),
+		" ".repeat(FULL_SIDE_WIDTH) + background(" ".repeat(faceWidth), shadow),
 	];
 }
 
@@ -182,7 +182,7 @@ function installPatch(owner: object): PatchState {
 		const faceColor = semanticBackgroundColor(this as unknown as RuntimeBox);
 		if (!faceColor) return originalRender.call(this, width);
 
-		const offset = mode === "hard" ? HARD_SIDE_WIDTH : mode === "half" ? HALF_SIDE_WIDTH : 2;
+		const offset = mode === "full" ? FULL_SIDE_WIDTH : mode === "half" ? HALF_SIDE_WIDTH : 2;
 		if (width <= offset + 2) return originalRender.call(this, width);
 
 		const faceWidth = width - offset;
@@ -192,7 +192,7 @@ function installPatch(owner: object): PatchState {
 		const near = shade(faceColor, 0.58);
 		if (mode === "half") return renderHalf(lines, faceWidth, near);
 		if (mode === "deep") return renderDeep(lines, faceWidth, near, shade(faceColor, 0.32));
-		return renderHard(lines, faceWidth, near);
+		return renderFull(lines, faceWidth, near);
 	};
 	state.patchedRender = patchedRender;
 	Box.prototype.render = patchedRender;
@@ -211,11 +211,11 @@ export default function blockDepth(pi: ExtensionAPI): void {
 	const state = installPatch(owner);
 
 	pi.registerCommand("block-depth", {
-		description: "Switch semantic block depth (hard, half, deep, off)",
+		description: "Switch semantic block depth (half, full, deep, off)",
 		handler: (args, ctx) => {
 			const requested = args.trim().toLowerCase();
 			if (requested && !isDepthMode(requested)) {
-				ctx.ui.notify("Usage: /block-depth [hard|half|deep|off]", "warning");
+				ctx.ui.notify("Usage: /block-depth [half|full|deep|off]", "warning");
 				return;
 			}
 			if (isDepthMode(requested)) state.mode = requested;
