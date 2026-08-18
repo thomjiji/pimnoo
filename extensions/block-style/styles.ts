@@ -19,6 +19,7 @@ type BlockStyleDefinition = {
 
 const FULL_SIDE_WIDTH = 3;
 const HALF_SIDE_WIDTH = 2;
+const RAIL_WIDTH = 2;
 const HALF_TOP_CUTOUT = "▄▖";
 
 function renderFull(lines: string[], faceWidth: number, shadow: RGB): string[] {
@@ -65,7 +66,7 @@ function renderOutline(lines: string[], faceWidth: number, border: RGB): string[
 }
 
 function renderRail(lines: string[], accent: RGB): string[] {
-	return lines.map((line) => foreground("┃", accent) + line);
+	return lines.map((line) => foreground("┃".repeat(RAIL_WIDTH), accent) + line);
 }
 
 function renderSpotlight(lines: string[], faceColor: RGB, semanticName: ThemeBg): string[] {
@@ -99,7 +100,7 @@ export const BLOCK_STYLES: Record<ActiveBlockStyle, BlockStyleDefinition> = {
 		render: ({ lines, faceWidth, faceColor }) => renderOutline(lines, faceWidth, shade(faceColor, 1.25)),
 	},
 	rail: {
-		reservedWidth: 1,
+		reservedWidth: RAIL_WIDTH,
 		render: ({ lines, faceColor }) => renderRail(lines, shade(faceColor, 1.15)),
 	},
 	spotlight: {

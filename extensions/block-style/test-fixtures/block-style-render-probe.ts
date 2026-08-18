@@ -70,7 +70,7 @@ function runBlockStyleProbe(): void {
 		if (railLines.length !== 3 || railLines.some((line) => visibleWidth(line) !== 40)) {
 			throw new Error("block-style rail did not preserve terminal width");
 		}
-		if (!railLines[1]?.includes("┃") || !railLines.some((line) => line.includes("\x1b[48;"))) {
+		if (!railLines[1]?.includes("┃┃") || !railLines.some((line) => line.includes("\x1b[48;"))) {
 			throw new Error("block-style rail did not preserve the semantic face fill");
 		}
 
