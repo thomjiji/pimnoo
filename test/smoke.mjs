@@ -348,14 +348,32 @@ export default function (pi: ExtensionAPI) {
 	}
 }
 
+async function assertStandaloneExtensionLoads(tempRoot) {
+	const agentDir = join(tempRoot, "agent-standalone");
+	const projectDir = join(tempRoot, "project-standalone");
+	const extensionDir = join(root, "extensions", "auto-title");
+	await mkdir(projectDir, { recursive: true });
+	await run(PI_BIN, ["install", extensionDir], {
+		cwd: projectDir,
+		env: { ...piEnv, PI_CODING_AGENT_DIR: agentDir, PI_OFFLINE: "1" },
+	});
+	const rpc = await runRpc(agentDir, projectDir, [{ id: "commands", type: "get_commands" }]);
+	assert.equal(rpc.code, 0, `Standalone extension failed to load:\n${rpc.stderr}\n${rpc.stdout}`);
+	assert.equal(rpc.lines.some((line) => line.type === "extension_error"), false, `Standalone extension error:\n${rpc.stdout}`);
+	const commands = commandList(rpc);
+	assert.equal(commands.filter((command) => command.name === "autotitle").length, 1);
+	assert.equal(commands.some((command) => command.name === "export-md"), false);
+	const autotitle = commands.find((command) => command.name === "autotitle");
+	assert.equal(autotitle?.sourceInfo.origin, "package");
+	assert.match(autotitle?.sourceInfo.path.replaceAll("\\", "/"), /extensions\/auto-title\/index\.ts$/);
+}
+
 async function assertLegacyCopiesAreRejected(tempRoot) {
 	const agentDir = join(tempRoot, "agent-legacy");
 	const projectDir = join(tempRoot, "project-legacy");
 	const legacyDir = join(agentDir, "extensions", "auto-title");
 	await mkdir(projectDir, { recursive: true });
 	await mkdir(legacyDir, { recursive: true });
-	await mkdir(join(agentDir, "extensions", "shared"), { recursive: true });
-	await cp(join(root, "extensions", "shared", "text.ts"), join(agentDir, "extensions", "shared", "text.ts"));
 	await cp(join(root, "extensions", "auto-title", "index.ts"), join(legacyDir, "index.ts"));
 	await cp(join(root, "extensions", "auto-title", "helpers.ts"), join(legacyDir, "helpers.ts"));
 	await writeFile(join(legacyDir, "package.json"), JSON.stringify({ pi: { extensions: ["./index.ts"] } }));
@@ -370,9 +388,8 @@ async function assertLegacyCopiesAreRejected(tempRoot) {
 
 	const exportAgentDir = join(tempRoot, "agent-legacy-export");
 	const exportProjectDir = join(tempRoot, "project-legacy-export");
-	await mkdir(join(exportAgentDir, "extensions", "shared"), { recursive: true });
+	await mkdir(join(exportAgentDir, "extensions"), { recursive: true });
 	await mkdir(exportProjectDir, { recursive: true });
-	await cp(join(root, "extensions", "shared", "text.ts"), join(exportAgentDir, "extensions", "shared", "text.ts"));
 	await cp(join(root, "extensions", "export-md", "index.ts"), join(exportAgentDir, "extensions", "export-md.ts"));
 	await run(PI_BIN, ["install", root], { cwd: exportProjectDir, env: { ...piEnv, PI_CODING_AGENT_DIR: exportAgentDir, PI_OFFLINE: "1" } });
 	const exportRpc = await runRpc(exportAgentDir, exportProjectDir, [{ id: "commands", type: "get_commands" }]);
@@ -449,6 +466,7 @@ async function assertGitUpdates(tempRoot) {
 const tempRoot = await mkdtemp(join(tmpdir(), "pimono-smoke-"));
 try {
 	await assertCleanPackageLoads(tempRoot);
+	await assertStandaloneExtensionLoads(tempRoot);
 	await assertLegacyCopiesAreRejected(tempRoot);
 	await assertLegacyCleanupScript(tempRoot);
 	await assertAutoTitleBehavior(tempRoot);

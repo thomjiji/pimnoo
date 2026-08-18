@@ -1,0 +1,12 @@
+{
+  "name": "pimono-reply-anchor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Add searchable anchors to Pi assistant replies",
+  "keywords": ["pi-package"],
+  "license": "MIT",
+  "type": "module",
+  "pi": {
+    "extensions": ["./index.ts"]
+  }
+}

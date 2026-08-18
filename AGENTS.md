@@ -18,4 +18,6 @@ When developing a new extension component or updating an existing one, plug only
 
 - New component (absent from the released package): add its checkout directory to the `extensions` array, e.g. `"extensions": ["/workspace/pimnoo/extensions/<name>"]`. No package filtering needed.
 - Updated component (already in the package): exclude it from the git package with an object-form filter and plug the checkout copy, e.g. package entry `{"source": "git:github.com/thomjiji/pimnoo", "extensions": ["!extensions/<name>/**"]}` plus `"extensions": ["/workspace/pimnoo/extensions/<name>"]`.
+- Visual or end-to-end verification: back up the settings file, load only the component under test, run `/reload` (or restart Pi), exercise the behavior in the real TUI, and restore the settings file afterward. Keep deterministic unit and smoke tests independent of the user settings.
+- Before declaring the check complete, inspect `pi list`, command/tool listings, or the source paths reported by Pi and confirm that the component has exactly one active source.
 - Switching the whole package between sources: remove the old entry before installing the new one (`pi remove <path>` then `pi install git:...`). A local path and a git URL are distinct package identities and both load side by side.

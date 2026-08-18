@@ -1,0 +1,12 @@
+{
+  "name": "pimono-export-md",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Export Pi sessions to filtered Markdown",
+  "keywords": ["pi-package"],
+  "license": "MIT",
+  "type": "module",
+  "pi": {
+    "extensions": ["./index.ts"]
+  }
+}

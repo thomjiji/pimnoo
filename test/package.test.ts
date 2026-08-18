@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-test("declares one umbrella Pi package and only the extension resource tree", () => {
+test("declares the umbrella package and standalone package boundaries", () => {
 	const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 	assert.equal(manifest.name, "pimono");
 	assert.equal(manifest.private, true);
@@ -28,10 +28,14 @@ test("declares one umbrella Pi package and only the extension resource tree", ()
 	for (const extensionName of readdirSync(join(root, "extensions"))) {
 		const extensionDir = join(root, "extensions", extensionName);
 		if (!statSync(extensionDir).isDirectory()) continue;
+		const extensionManifest = JSON.parse(readFileSync(join(extensionDir, "package.json"), "utf8"));
+		assert.equal(extensionManifest.private, true);
+		assert.deepEqual(extensionManifest.pi?.extensions, ["./index.ts"]);
 		for (const fileName of readdirSync(extensionDir)) {
 			if (fileName === "index.ts") discoveredEntrypoints.push(`${extensionName}/${fileName}`);
 		}
 	}
 	assert.deepEqual(discoveredEntrypoints.sort(), expectedEntrypoints.sort());
+	assert.equal(statSync(join(root, "extensions", "shared"), { throwIfNoEntry: false }), undefined);
 	assert.equal(statSync(join(root, "extensions", "bash-readable", "format.ts")).isFile(), true);
 });

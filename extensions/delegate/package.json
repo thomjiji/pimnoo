@@ -1,0 +1,12 @@
+{
+  "name": "pimono-delegate",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Run isolated headless Pi workers in Git worktrees",
+  "keywords": ["pi-package"],
+  "license": "MIT",
+  "type": "module",
+  "pi": {
+    "extensions": ["./index.ts"]
+  }
+}

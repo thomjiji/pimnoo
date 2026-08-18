@@ -1,6 +1,6 @@
 # pimono
 
-`pimono` 是一个由 Git 跟踪的个人 Pi umbrella package。它把个人扩展作为一个安装和更新单元管理，不创建独立的子 package，也不依赖自动发现目录中的旧副本。
+`pimono` 是一个由 Git 跟踪的个人 Pi umbrella package。根 package 方便一次安装和更新全部扩展；每个 `extensions/<name>/` 目录同时是一个自包含的 Pi package 单元，因此也可以只安装其中一个，不依赖自动发现目录中的旧副本。
 
 ## 包含的扩展
 
@@ -14,7 +14,7 @@
 | `reply-anchor` | `extensions/reply-anchor/index.ts` | 在 agent 回复开头添加可搜索的 `§` 锚点 |
 | `session-breakdown` | `extensions/session-breakdown/index.ts` | 以 Pi 风格全屏界面分析最近 7、30、90 天的 session 使用情况 |
 
-`bash-readable/format.ts` 是 package 内部 helper，不是 Pi extension。根目录的 `package.json` 通过 `pi.extensions` 声明 `./extensions`，Pi 的 package 目录发现规则只加载每个子目录的 `index.ts`，因此 helper 和测试不会被当成 extension 加载。
+每个扩展目录都有自己的最小 `package.json`，通过 `pi.extensions` 明确只加载 `./index.ts`；目录里的 helper（例如 `bash-readable/format.ts` 和 `auto-title/helpers.ts`）仍然只是该扩展的内部源码，不会被当成独立 extension 加载。根目录的 `package.json` 通过 `pi.extensions` 声明 `./extensions`，所以安装根 package 时仍然会加载全部这些自包含单元。
 
 ## Delegate worker
 
@@ -55,7 +55,15 @@ pi install git:github.com/<account>/pimono
 pi list
 ```
 
-如果只想在一个项目中测试或选择性采用，可以使用 project scope：
+如果只想使用一个扩展，可以直接安装它的目录。下面的例子只加载 `auto-title`，不会加载 `export-md`、`delegate` 或其他扩展：
+
+```bash
+pi install /path/to/pimono/extensions/auto-title
+```
+
+远程 Git source 的安装粒度是整个仓库；如果不想让其他扩展被加载，可以在 settings 中把 package 写成对象并筛选资源，例如 `{"source": "git:github.com/<account>/pimono", "extensions": ["extensions/auto-title/**"]}`。如果连仓库 checkout 都不想保留，就需要单独的 npm package 或单独的 Git 仓库；当前不为此给每个小扩展增加发布流水线。
+
+如果只想在一个项目中使用根 package，可以使用 project scope：
 
 ```bash
 cd /path/to/project
@@ -72,7 +80,13 @@ pi install -l git:github.com/<account>/pimono
 pi install /path/to/pimono
 ```
 
-只开发单个组件时可以只挂载该组件而不切换整个包：在 `~/.pi/agent/settings.json` 的 `packages` 里用对象形式把该组件从 git 源排除（例如 `{"source": "git:github.com/<account>/pimono", "extensions": ["!extensions/<name>/**"]}`），同时在 `extensions` 数组里挂载 checkout 里的组件目录；新组件直接挂载即可。修改 settings 后 `/reload`，并确认每个扩展只加载一次——同一个组件从两个来源加载会重复注册。
+只开发或验证单个组件时，直接挂载它自己的目录即可：
+
+```bash
+pi install /path/to/pimono/extensions/auto-title
+```
+
+如果同时保留了 umbrella package，则不要再从该 umbrella package 加载同一个组件；可以在 `~/.pi/agent/settings.json` 的 `packages` 里用对象形式排除它（例如 `{"source": "git:github.com/<account>/pimono", "extensions": ["!extensions/auto-title/**"]}`）。修改 settings 后 `/reload`，并确认每个扩展只加载一次——同一个组件从两个来源加载会重复注册。
 
 Windows 主机可以在 settings 中使用主机路径，例如 `C:\Users\<name>\git\pimono`。如果 Pi 在 WSL、容器或其他 runtime 中运行，应把这个路径替换为该 runtime 能访问的对应路径；扩展代码不包含任何环境专用 loader path。
 
@@ -81,6 +95,34 @@ Windows 主机可以在 settings 中使用主机路径，例如 `C:\Users\<name>
 ```bash
 pi -e /path/to/pimono
 ```
+
+## 真实 Pi 端到端验证
+
+单元测试和 package smoke test 验证逻辑与加载边界；需要确认 TUI 视觉效果或真实 Pi 生命周期时，再把 checkout 中的目标扩展 plug 到正在使用的 settings。先备份 `~/.pi/agent/settings.json`，只挂载待验证的扩展目录，运行 `/reload` 或重启 Pi，实际操作对应命令或界面，然后恢复 settings；不要让 umbrella package 和 checkout 同时加载同一个扩展。
+
+新扩展可以直接挂载：
+
+```json
+{
+  "extensions": ["/path/to/pimono/extensions/<name>"]
+}
+```
+
+如果扩展已经由 Git package 提供，则在 package 对象中排除 Git 版本，再挂载 checkout 版本：
+
+```json
+{
+  "packages": [
+    {
+      "source": "git:github.com/<account>/pimono",
+      "extensions": ["!extensions/<name>/**"]
+    }
+  ],
+  "extensions": ["/path/to/pimono/extensions/<name>"]
+}
+```
+
+验证完成前检查 `pi list`、命令或 tool 列表以及 Pi 报告的 source path，确认待测组件只有一个 active source。视觉验证是补充，不替代可重复的 unit、typecheck 和 smoke test。
 
 ## 更新和回滚
 
@@ -126,15 +168,15 @@ pi list
 
 新增 extension 时按下面的顺序操作：
 
-1. 将源码放入 `extensions/<name>/`，把入口命名为 `index.ts`。
+1. 将源码放入 `extensions/<name>/`，把入口命名为 `index.ts`，并为该目录添加只声明 `./index.ts` 的最小 `package.json`。
 2. 在根 `package.json` 的 `pi.extensions` 允许范围内确认入口可被发现；不要把 helper、fixture、测试或文档放入可执行入口。
-3. 为可观察行为增加独立于 package 安装机制的测试；如果 extension 没有合适的纯函数 seam，至少让 smoke test 验证加载成功。
+3. 为可观察行为增加独立于 package 安装机制的测试，并用该目录的 local path 验证它可以单独加载；如果 extension 没有合适的纯函数 seam，至少让 smoke test 验证加载成功。
 4. 更新上面的扩展清单和本节 checklist。
 5. 检查旧全局副本、命令重复和不应加载的 helper。
 6. 设置可信的 Pi CLI 路径并运行 `PI_BIN=/path/to/pi npm test`、`npm run typecheck` 和 `git diff --check`。
 7. 在干净 agent directory 中运行 package smoke test，然后再提交默认分支。
 
-未来如果某个扩展获得独立用户、依赖或 release cadence，可以把它拆成自己的 Pi package。拆分时为该扩展增加自己的 manifest、README、版本和依赖契约，不需要改变其他扩展的行为契约。
+当前采用两层边界：根目录是便于个人同步的 umbrella package，扩展目录是便于选择性安装的最小 Pi package；暂不把每个单文件扩展都发布成独立 npm package。对没有第三方依赖、没有独立版本节奏的 `auto-title` 这类扩展，npm 发布只会额外引入包名、版本和发布维护成本，不会改善 Pi 的运行方式。若以后需要远程用户用一条 npm 命令安装某个扩展，可以直接发布现有扩展目录，不需要再复制一套 monorepo package 结构。
 
 ## 测试
 
@@ -160,6 +202,6 @@ npm run test:smoke
 
 ## 目录和发布范围
 
-根 `package.json` 是 umbrella package 的唯一 manifest。`extensions/` 只包含七个运行时 extension 和 `bash-readable` 的内部 helper；`test/`、`scripts/` 和文档不在 `pi.extensions` 的资源范围内。初始版本不发布 npm、不添加第三方 runtime dependency、不创建 sibling package，也不提供会安装其他 package 的 `/setup` 命令。
+根 `package.json` 是 umbrella package 的聚合 manifest；每个 `extensions/<name>/package.json` 是只声明 `./index.ts` 的最小独立 Pi manifest。`extensions/` 包含七个运行时 extension 和各自的内部 helper；`test/`、`scripts/` 和文档不在 `pi.extensions` 的资源范围内。当前不发布 npm、不添加第三方 runtime dependency，也不提供会安装其他 package 的 `/setup` 命令。
 
 `session-breakdown` 集成自 mitsuhiko/agent-stuff 的 `extensions/session-breakdown.ts`（Apache-2.0），保留数据分析逻辑并将全屏界面改为 Pi 风格的上下横线布局。许可证文本见 `LICENSES/Apache-2.0.txt`。

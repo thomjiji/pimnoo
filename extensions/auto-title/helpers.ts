@@ -32,7 +32,29 @@ export const formatSessionTimestamp = (timestamp: string): string | undefined =>
 	return `${String(date.getFullYear()).slice(-2)}${pad(date.getMonth() + 1)}${pad(date.getDate())}${pad(date.getHours())}${pad(date.getMinutes())}`;
 };
 
-export { extractText } from "../shared/text.ts";
+export const extractText = (content: unknown): string => {
+	if (typeof content === "string") {
+		return content;
+	}
+
+	if (!Array.isArray(content)) {
+		return "";
+	}
+
+	const parts: string[] = [];
+	for (const block of content) {
+		if (!block || typeof block !== "object") {
+			continue;
+		}
+
+		const part = block as { type?: unknown; text?: unknown };
+		if (part.type === "text" && typeof part.text === "string") {
+			parts.push(part.text);
+		}
+	}
+
+	return parts.join("\n");
+};
 
 export type ConversationMessage = {
 	role: "user" | "assistant";

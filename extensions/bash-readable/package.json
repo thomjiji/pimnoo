@@ -1,0 +1,12 @@
+{
+  "name": "pimono-bash-readable",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Render chained Bash commands without changing execution",
+  "keywords": ["pi-package"],
+  "license": "MIT",
+  "type": "module",
+  "pi": {
+    "extensions": ["./index.ts"]
+  }
+}
