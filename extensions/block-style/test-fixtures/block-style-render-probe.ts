@@ -78,13 +78,13 @@ function runBlockStyleProbe(): void {
 		const quietSpotlightBox = new Box(1, 1, (text) => userMessageBackground(text));
 		quietSpotlightBox.addChild(new Text("quiet", 0, 0));
 		const quietSpotlightLines = quietSpotlightBox.render(40);
-		if (!quietSpotlightLines[1]?.includes("│") || quietSpotlightLines.some((line) => line.includes("\x1b[48;"))) {
-			throw new Error("block-style spotlight did not quiet completed blocks");
+		if (!quietSpotlightLines[1]?.includes("█") || !quietSpotlightLines.some((line) => line.includes("\x1b[48;"))) {
+			throw new Error("block-style spotlight did not preserve completed block fills");
 		}
 		const activeSpotlightBox = new Box(1, 1, (text) => pendingToolBackground(text));
 		activeSpotlightBox.addChild(new Text("active", 0, 0));
 		const activeSpotlightLines = activeSpotlightBox.render(40);
-		if (!activeSpotlightLines[1]?.includes("┃") || !activeSpotlightLines.some((line) => line.includes("\x1b[48;"))) {
+		if (!activeSpotlightLines[1]?.includes("█") || !activeSpotlightLines.some((line) => line.includes("\x1b[48;"))) {
 			throw new Error("block-style spotlight did not emphasize pending blocks");
 		}
 

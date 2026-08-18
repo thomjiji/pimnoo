@@ -73,9 +73,7 @@ function renderRail(lines: string[], accent: RGB): string[] {
 function renderSpotlight(lines: string[], faceColor: RGB, semanticName: ThemeBg): string[] {
 	const active = semanticName === "toolPendingBg";
 	const accent = shade(faceColor, active ? 1.25 : 0.78);
-	const rail = active ? "┃" : "│";
-	const content = active ? lines : lines.map(stripBackground);
-	return content.map((line) => foreground(rail, accent) + line);
+	return lines.map((line) => foreground("█", accent) + line);
 }
 
 /**
