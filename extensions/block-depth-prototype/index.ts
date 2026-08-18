@@ -38,9 +38,8 @@ const BLOCK_BACKGROUNDS: ThemeBg[] = [
 ];
 const DEPTH_MODES = new Set<DepthMode>(["hard", "half", "deep", "off"]);
 const HARD_SIDE_WIDTH = 3;
-const HARD_TOP_BEVEL = "▇▄▁";
 const HALF_SIDE_WIDTH = 2;
-const HALF_TOP_BEVEL = "▆▂";
+const HALF_TOP_CUTOUT = "▄▖";
 
 const BASIC_ANSI_COLORS: RGB[] = [
 	{ r: 0, g: 0, b: 0 },
@@ -140,7 +139,7 @@ function renderHard(lines: string[], faceWidth: number, shadow: RGB): string[] {
 	const [firstLine, ...remainingLines] = lines;
 	if (!firstLine) return lines;
 	return [
-		firstLine + foreground(HARD_TOP_BEVEL, shadow),
+		firstLine + " ".repeat(HARD_SIDE_WIDTH),
 		...remainingLines.map((line) => line + background(" ".repeat(HARD_SIDE_WIDTH), shadow)),
 		" ".repeat(HARD_SIDE_WIDTH) + background(" ".repeat(faceWidth), shadow),
 	];
@@ -151,7 +150,7 @@ function renderHalf(lines: string[], faceWidth: number, shadow: RGB): string[] {
 	if (!firstLine) return lines;
 	const bottom = "▝" + "▀".repeat(Math.max(0, faceWidth - 1)) + "▘";
 	return [
-		firstLine + foreground(HALF_TOP_BEVEL, shadow),
+		firstLine + foreground(HALF_TOP_CUTOUT, shadow),
 		...remainingLines.map((line) => line + background(" ", shadow) + foreground("▌", shadow)),
 		" " + foreground(bottom, shadow),
 	];
@@ -169,13 +168,13 @@ function installPatch(owner: object): PatchState {
 	const prototype = Box.prototype as typeof Box.prototype & Record<PropertyKey, unknown>;
 	const existing = prototype[PATCH_MARKER] as PatchState | undefined;
 	if (existing) {
-		existing.mode = "hard";
+		existing.mode = "half";
 		existing.owner = owner;
 		return existing;
 	}
 
 	const originalRender = Box.prototype.render;
-	const state: PatchState = { mode: "hard", owner, originalRender, patchedRender: originalRender };
+	const state: PatchState = { mode: "half", owner, originalRender, patchedRender: originalRender };
 	const patchedRender = function renderBlockWithDepth(this: Box, width: number): string[] {
 		const mode = state.mode;
 		if (mode === "off") return originalRender.call(this, width);
