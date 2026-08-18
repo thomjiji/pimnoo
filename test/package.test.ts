@@ -23,7 +23,6 @@ test("declares the umbrella package and standalone package boundaries", () => {
 		"export-md/index.ts",
 		"no-italic/index.ts",
 		"reply-anchor/index.ts",
-		"session-breakdown/index.ts",
 	];
 	const discoveredEntrypoints: string[] = [];
 	for (const extensionName of readdirSync(join(root, "extensions"))) {
