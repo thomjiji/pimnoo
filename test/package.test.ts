@@ -18,7 +18,7 @@ test("declares the umbrella package and standalone package boundaries", () => {
 	const expectedEntrypoints = [
 		"auto-title/index.ts",
 		"bash-readable/index.ts",
-		"block-depth-prototype/index.ts",
+		"block-depth/index.ts",
 		"delegate/index.ts",
 		"export-md/index.ts",
 		"no-italic/index.ts",

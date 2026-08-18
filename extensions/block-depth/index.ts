@@ -1,6 +1,6 @@
 /**
- * PROTOTYPE: compare three terminal-friendly depth treatments for Pi's
- * semantic background blocks. Switch at runtime with:
+ * Add terminal-friendly depth treatments to Pi's semantic background blocks.
+ * Switch at runtime with:
  *
  *   /block-depth hard|half|deep|off
  *
@@ -27,7 +27,7 @@ type PatchState = {
 	patchedRender: (width: number) => string[];
 };
 
-const PATCH_MARKER = Symbol.for("pimnoo.block-depth-prototype");
+const PATCH_MARKER = Symbol.for("pimnoo.block-depth");
 const SAMPLE = "pimnoo-block-depth-sample";
 const BLOCK_BACKGROUNDS: ThemeBg[] = [
 	"userMessageBg",
@@ -206,12 +206,12 @@ function installPatch(owner: object): PatchState {
 	return state;
 }
 
-export default function blockDepthPrototype(pi: ExtensionAPI): void {
+export default function blockDepth(pi: ExtensionAPI): void {
 	const owner = {};
 	const state = installPatch(owner);
 
 	pi.registerCommand("block-depth", {
-		description: "PROTOTYPE: switch semantic block depth (hard, half, deep, off)",
+		description: "Switch semantic block depth (hard, half, deep, off)",
 		handler: (args, ctx) => {
 			const requested = args.trim().toLowerCase();
 			if (requested && !isDepthMode(requested)) {
@@ -219,7 +219,7 @@ export default function blockDepthPrototype(pi: ExtensionAPI): void {
 				return;
 			}
 			if (isDepthMode(requested)) state.mode = requested;
-			ctx.ui.notify(`Block depth prototype: ${state.mode}`, "info");
+			ctx.ui.notify(`Block depth: ${state.mode}`, "info");
 		},
 	});
 

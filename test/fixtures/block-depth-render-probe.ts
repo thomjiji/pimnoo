@@ -12,7 +12,7 @@ const userMessageBackground = (text: string): string => probeTheme.bg(semanticBa
 /** Regression probe: the real Box patch renders semantic depth without changing terminal width. */
 export default function blockDepthRenderProbe(_pi: ExtensionAPI): void {
 	const patch = (Box.prototype as typeof Box.prototype & Record<PropertyKey, unknown>)[
-		Symbol.for("pimnoo.block-depth-prototype")
+		Symbol.for("pimnoo.block-depth")
 	] as { mode: "hard" | "half" | "deep" | "off" } | undefined;
 	if (!patch) throw new Error("block-depth patch marker is missing");
 	if (patch.mode !== "half") throw new Error("block-depth did not default to half mode");
