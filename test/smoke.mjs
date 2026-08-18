@@ -368,6 +368,31 @@ async function assertStandaloneExtensionLoads(tempRoot) {
 	assert.match(autotitle?.sourceInfo.path.replaceAll("\\", "/"), /extensions\/auto-title\/index\.ts$/);
 }
 
+async function assertStandaloneBlockDepthLoads(tempRoot) {
+	const agentDir = join(tempRoot, "agent-standalone-block-depth");
+	const projectDir = join(tempRoot, "project-standalone-block-depth");
+	const extensionDir = join(root, "extensions", "block-depth");
+	const probePath = join(root, "test", "fixtures", "block-depth-render-probe.ts");
+	await mkdir(projectDir, { recursive: true });
+	await run(PI_BIN, ["install", extensionDir], {
+		cwd: projectDir,
+		env: { ...piEnv, PI_CODING_AGENT_DIR: agentDir, PI_OFFLINE: "1" },
+	});
+	const rpc = await runRpc(agentDir, projectDir, [
+		{ id: "commands", type: "get_commands" },
+		{ id: "probe", type: "prompt", message: "/block-depth-render-probe" },
+	], ["-e", probePath]);
+	assert.equal(rpc.code, 0, `Standalone block-depth failed to load:\n${rpc.stderr}\n${rpc.stdout}`);
+	assert.equal(rpc.lines.some((line) => line.type === "extension_error"), false, `Standalone block-depth error:\n${rpc.stdout}`);
+	const commands = commandList(rpc);
+	assert.equal(commands.filter((command) => command.name === "block-depth").length, 1);
+	assert.equal(commands.some((command) => command.name === "autotitle"), false);
+	assert.equal(response(rpc.lines, "probe")?.success, true, `Standalone block-depth probe failed:\n${rpc.stdout}`);
+	const blockDepth = commands.find((command) => command.name === "block-depth");
+	assert.equal(blockDepth?.sourceInfo.origin, "package");
+	assert.match(blockDepth?.sourceInfo.path.replaceAll("\\", "/"), /extensions\/block-depth\/index\.ts$/);
+}
+
 async function assertLegacyCopiesAreRejected(tempRoot) {
 	const agentDir = join(tempRoot, "agent-legacy");
 	const projectDir = join(tempRoot, "project-legacy");
@@ -467,6 +492,7 @@ const tempRoot = await mkdtemp(join(tmpdir(), "pimono-smoke-"));
 try {
 	await assertCleanPackageLoads(tempRoot);
 	await assertStandaloneExtensionLoads(tempRoot);
+	await assertStandaloneBlockDepthLoads(tempRoot);
 	await assertLegacyCopiesAreRejected(tempRoot);
 	await assertLegacyCleanupScript(tempRoot);
 	await assertAutoTitleBehavior(tempRoot);

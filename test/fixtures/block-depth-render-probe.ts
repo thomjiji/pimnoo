@@ -10,7 +10,14 @@ const semanticBackgroundName = "userMessageBg";
 const userMessageBackground = (text: string): string => probeTheme.bg(semanticBackgroundName, text);
 
 /** Regression probe: the real Box patch renders semantic depth without changing terminal width. */
-export default function blockDepthRenderProbe(_pi: ExtensionAPI): void {
+export default function blockDepthRenderProbe(pi: ExtensionAPI): void {
+	pi.registerCommand("block-depth-render-probe", {
+		description: "Run the block-depth render probe",
+		handler: () => runBlockDepthProbe(),
+	});
+}
+
+function runBlockDepthProbe(): void {
 	const patch = (Box.prototype as typeof Box.prototype & Record<PropertyKey, unknown>)[
 		Symbol.for("pimnoo.block-depth")
 	] as { mode: "hard" | "half" | "deep" | "off" } | undefined;
