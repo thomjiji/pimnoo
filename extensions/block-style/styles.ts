@@ -19,7 +19,8 @@ type BlockStyleDefinition = {
 
 const FULL_SIDE_WIDTH = 3;
 const HALF_SIDE_WIDTH = 2;
-const RAIL_WIDTH = 2;
+const RAIL_WIDTH = 1;
+const RAIL_GLYPH = "█";
 const HALF_TOP_CUTOUT = "▄▖";
 
 function renderFull(lines: string[], faceWidth: number, shadow: RGB): string[] {
@@ -66,7 +67,7 @@ function renderOutline(lines: string[], faceWidth: number, border: RGB): string[
 }
 
 function renderRail(lines: string[], accent: RGB): string[] {
-	return lines.map((line) => foreground("┃".repeat(RAIL_WIDTH), accent) + line);
+	return lines.map((line) => foreground(RAIL_GLYPH, accent) + line);
 }
 
 function renderSpotlight(lines: string[], faceColor: RGB, semanticName: ThemeBg): string[] {
