@@ -11,6 +11,7 @@ test("declares the umbrella package and standalone package boundaries", () => {
 	assert.equal(manifest.name, "pimono");
 	assert.equal(manifest.private, true);
 	assert.ok(manifest.keywords.includes("pi-package"));
+	assert.ok(manifest.files.includes("LICENSE"));
 	assert.deepEqual(manifest.pi.extensions, ["./extensions"]);
 	assert.equal(manifest.dependencies, undefined);
 	assert.equal(manifest.devDependencies, undefined);
