@@ -50,6 +50,9 @@ function runBlockStyleProbe(): void {
 	if (hatchLines[0]?.includes("░")) {
 		throw new Error("block-style hatch mode did not cut out the full upper-right square");
 	}
+	if (!hatchLines.at(-1)?.startsWith("  \x1b[")) {
+		throw new Error("block-style hatch mode did not cut out the lower-left hatch square");
+	}
 
 	patch.style = "full";
 	try {
