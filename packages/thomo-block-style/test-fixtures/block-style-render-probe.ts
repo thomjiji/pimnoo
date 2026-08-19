@@ -1,5 +1,6 @@
 import { Theme, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Box, Text, TuiAltScreen, visibleWidth } from "@earendil-works/pi-tui";
+import { BLOCK_STYLE_COPY_MARKER } from "../styles.ts";
 
 const probeTheme = new Theme(
 	{ text: "", thinkingXhigh: "" } as ConstructorParameters<typeof Theme>[0],
@@ -33,8 +34,8 @@ async function runBlockStyleProbe(): Promise<void> {
 	if (halfLines.length !== 5 || halfLines.some((line) => visibleWidth(line) !== 40)) {
 		throw new Error("block-style half mode did not reserve proportional side width");
 	}
-	if (halfLines.some((line) => /[▄▖▌▝▀▘]/u.test(line))) {
-		throw new Error("block-style half mode leaked decorative glyphs into selectable text");
+	if (halfLines.some((line) => /[▄▖▌▝▀▘]/u.test(line) && !line.includes(BLOCK_STYLE_COPY_MARKER))) {
+		throw new Error("block-style half mode did not mark decorative glyphs for native copy");
 	}
 	if (!halfLines[0]?.endsWith("  ")) {
 		throw new Error("block-style half mode did not cut out the upper-right square");
