@@ -22,7 +22,8 @@ const HALF_SIDE_WIDTH = 2;
 const RAIL_WIDTH = 1;
 const RAIL_GLYPH = "█";
 const HALF_TOP_CUTOUT = "▄▖";
-const HALF_HATCH_GLYPH = "▒";
+const HALF_HATCH_GLYPH = "╲";
+const HALF_HATCH_SIDE_PATTERNS = ["╲ ", " ╲"] as const;
 
 function renderFull(lines: string[], faceWidth: number, shadow: RGB): string[] {
 	const [firstLine, ...remainingLines] = lines;
@@ -46,12 +47,18 @@ function renderHalf(lines: string[], faceWidth: number, shadow: RGB): string[] {
 }
 
 function renderHalfHatch(lines: string[], faceWidth: number, shadow: RGB): string[] {
-	const side = foreground(HALF_HATCH_GLYPH.repeat(HALF_SIDE_WIDTH), shadow);
+	const hatch = (text: string): string => `\x1b[1m${foreground(text, shadow)}\x1b[22m`;
 	const top = " ".repeat(HALF_SIDE_WIDTH);
-	const bottom = foreground(HALF_HATCH_GLYPH.repeat(faceWidth + 1), shadow);
+	const bottom = hatch(
+		Array.from({ length: faceWidth + 1 }, (_, index) => (index % 2 === 0 ? HALF_HATCH_GLYPH : " ")).join(""),
+	);
 	const [firstLine, ...remainingLines] = lines;
 	if (!firstLine) return lines;
-	return [firstLine + top, ...remainingLines.map((line) => line + side), " " + bottom];
+	return [
+		firstLine + top,
+		...remainingLines.map((line, index) => line + hatch(HALF_HATCH_SIDE_PATTERNS[index % HALF_HATCH_SIDE_PATTERNS.length])),
+		" " + bottom,
+	];
 }
 
 function renderDeep(lines: string[], faceWidth: number, near: RGB, far: RGB): string[] {

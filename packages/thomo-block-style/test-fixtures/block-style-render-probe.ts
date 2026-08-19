@@ -44,10 +44,10 @@ function runBlockStyleProbe(): void {
 	if (halfHatchLines.length !== 5 || halfHatchLines.some((line) => visibleWidth(line) !== 40)) {
 		throw new Error("block-style half-hatch mode did not reserve proportional side width");
 	}
-	if (halfHatchLines[0]?.includes("▒") || halfHatchLines.slice(1).some((line) => !line.includes("▒")) || halfHatchLines.some((line) => /[▄▖▌▝▀▘░▚]/u.test(line))) {
-		throw new Error("block-style half-hatch mode did not render a unified coarse diagonal hatch");
+	if (halfHatchLines[0]?.includes("╲") || halfHatchLines.slice(1).some((line) => !line.includes("╲") || !line.includes("\x1b[1m")) || halfHatchLines.some((line) => /[▄▖▌▝▀▘░▚▒]/u.test(line))) {
+		throw new Error("block-style half-hatch mode did not render a bold sparse diagonal hatch");
 	}
-	if (halfHatchLines[0]?.includes("▒")) {
+	if (halfHatchLines[0]?.includes("╲")) {
 		throw new Error("block-style half-hatch mode did not cut out the full upper-right square");
 	}
 
