@@ -10,14 +10,9 @@
  */
 
 import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Box, TuiAltScreen } from "@earendil-works/pi-tui";
+import { Box } from "@earendil-works/pi-tui";
 import { semanticBackground, shade } from "./colors.ts";
-import {
-	BLOCK_STYLES,
-	isBlockStyle,
-	stripBlockStyleDecorations,
-	type BlockStyle,
-} from "./styles.ts";
+import { BLOCK_STYLES, isBlockStyle, type BlockStyle } from "./styles.ts";
 
 type PatchState = {
 	style: BlockStyle;
@@ -26,55 +21,7 @@ type PatchState = {
 	patchedRender: (width: number) => string[];
 };
 
-type RuntimeTui = Record<PropertyKey, unknown> & {
-	copySelection?: (text: string) => Promise<boolean>;
-};
-
-type CopyPatchState = {
-	owner: object;
-	originalCopy: (this: RuntimeTui) => Promise<void>;
-	patchedCopy: (this: RuntimeTui) => Promise<void>;
-};
-
 const PATCH_MARKER = Symbol.for("thomo.block-style");
-const COPY_PATCH_MARKER = Symbol.for("thomo.block-style-copy");
-
-/**
- * Pi's native copier receives rendered rows, so it has no public decoration hook.
- * Temporarily wrap its clipboard callback and strip only our marked glyphs.
- */
-function installCopyPatch(owner: object): CopyPatchState {
-	const prototype = TuiAltScreen.prototype as unknown as Record<PropertyKey, unknown>;
-	const existing = prototype[COPY_PATCH_MARKER] as CopyPatchState | undefined;
-	if (existing) {
-		existing.owner = owner;
-		return existing;
-	}
-
-	const originalCopy = prototype.copySelectionToClipboard as CopyPatchState["originalCopy"];
-	const patchedCopy = async function copySelectionWithoutDecorations(this: RuntimeTui): Promise<void> {
-		const originalSelectionCopy = this.copySelection;
-		if (!originalSelectionCopy) {
-			await originalCopy.call(this);
-			return;
-		}
-		this.copySelection = async (text) => originalSelectionCopy(stripBlockStyleDecorations(text));
-		try {
-			await originalCopy.call(this);
-		} finally {
-			this.copySelection = originalSelectionCopy;
-		}
-	};
-	const state: CopyPatchState = { owner, originalCopy, patchedCopy };
-	prototype.copySelectionToClipboard = patchedCopy;
-	Object.defineProperty(prototype, COPY_PATCH_MARKER, {
-		configurable: true,
-		enumerable: false,
-		value: state,
-		writable: false,
-	});
-	return state;
-}
 
 function installPatch(owner: object): PatchState {
 	const prototype = Box.prototype as typeof Box.prototype & Record<PropertyKey, unknown>;
@@ -125,7 +72,6 @@ function installPatch(owner: object): PatchState {
 export default function blockStyle(pi: ExtensionAPI): void {
 	const owner = {};
 	const state = installPatch(owner);
-	const copyState = installCopyPatch(owner);
 
 	pi.registerCommand("block-style", {
 		description: "Switch semantic block style (half, hatch, full, deep, outline, rail, spotlight, off)",
@@ -141,16 +87,10 @@ export default function blockStyle(pi: ExtensionAPI): void {
 	});
 
 	pi.on("session_shutdown", () => {
-		const boxPrototype = Box.prototype as typeof Box.prototype & Record<PropertyKey, unknown>;
-		if (state.owner === owner && boxPrototype[PATCH_MARKER] === state && Box.prototype.render === state.patchedRender) {
-			Box.prototype.render = state.originalRender;
-			delete boxPrototype[PATCH_MARKER];
-		}
-
-		const tuiPrototype = TuiAltScreen.prototype as unknown as Record<PropertyKey, unknown>;
-		if (copyState.owner === owner && tuiPrototype[COPY_PATCH_MARKER] === copyState && tuiPrototype.copySelectionToClipboard === copyState.patchedCopy) {
-			tuiPrototype.copySelectionToClipboard = copyState.originalCopy;
-			delete tuiPrototype[COPY_PATCH_MARKER];
-		}
+		const prototype = Box.prototype as typeof Box.prototype & Record<PropertyKey, unknown>;
+		if (state.owner !== owner) return;
+		if (prototype[PATCH_MARKER] !== state || Box.prototype.render !== state.patchedRender) return;
+		Box.prototype.render = state.originalRender;
+		delete prototype[PATCH_MARKER];
 	});
 }

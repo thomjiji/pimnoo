@@ -17,22 +17,11 @@ type BlockStyleDefinition = {
 	render: (context: BlockStyleContext) => string[];
 };
 
-/** Zero-width marker used to remove our decorative glyphs from Pi's native copy path. */
-export const BLOCK_STYLE_COPY_MARKER = "\u2060";
-const MARKED_DECORATION = /\u2060[▄▖▌▝▀▘░█┏━┓┃┗┛]/gu;
-
-export function markBlockStyleDecoration(text: string): string {
-	return [...text].map((character) => BLOCK_STYLE_COPY_MARKER + character).join("");
-}
-
-export function stripBlockStyleDecorations(text: string): string {
-	return text.replace(MARKED_DECORATION, "");
-}
-
 const FULL_SIDE_WIDTH = 3;
 const HALF_SIDE_WIDTH = 2;
 const RAIL_WIDTH = 1;
 const RAIL_GLYPH = "█";
+const HALF_TOP_CUTOUT = "▄▖";
 const HATCH_GLYPH = "░";
 
 function renderFull(lines: string[], faceWidth: number, shadow: RGB): string[] {
@@ -48,16 +37,18 @@ function renderFull(lines: string[], faceWidth: number, shadow: RGB): string[] {
 function renderHalf(lines: string[], faceWidth: number, shadow: RGB): string[] {
 	const [firstLine, ...remainingLines] = lines;
 	if (!firstLine) return lines;
-	const top = " ".repeat(HALF_SIDE_WIDTH); // Preserve the unstyled upper-right cutout.
-	const side = background(" ", shadow) + foreground(markBlockStyleDecoration("▌"), shadow);
-	const bottom = markBlockStyleDecoration("▝" + "▀".repeat(Math.max(0, faceWidth - 1)) + "▘");
-	return [firstLine + top, ...remainingLines.map((line) => line + side), " " + foreground(bottom, shadow)];
+	const bottom = "▝" + "▀".repeat(Math.max(0, faceWidth - 1)) + "▘";
+	return [
+		firstLine + foreground(HALF_TOP_CUTOUT, shadow),
+		...remainingLines.map((line) => line + background(" ", shadow) + foreground("▌", shadow)),
+		" " + foreground(bottom, shadow),
+	];
 }
 
 function renderHatch(lines: string[], faceWidth: number, shadow: RGB): string[] {
-	const side = foreground(markBlockStyleDecoration(HATCH_GLYPH.repeat(HALF_SIDE_WIDTH)), shadow);
+	const side = foreground(HATCH_GLYPH.repeat(HALF_SIDE_WIDTH), shadow);
 	const top = " ".repeat(HALF_SIDE_WIDTH);
-	const bottom = foreground(markBlockStyleDecoration(HATCH_GLYPH.repeat(faceWidth)), shadow);
+	const bottom = foreground(HATCH_GLYPH.repeat(faceWidth), shadow);
 	const [firstLine, ...remainingLines] = lines;
 	if (!firstLine) return lines;
 	return [firstLine + top, ...remainingLines.map((line) => line + side), "  " + bottom];
@@ -74,25 +65,25 @@ function renderDeep(lines: string[], faceWidth: number, near: RGB, far: RGB): st
 function renderOutline(lines: string[], faceWidth: number, border: RGB): string[] {
 	const cleanLines = lines.map(stripBackground);
 	if (cleanLines.length < 2) {
-		return cleanLines.map((line) => foreground(markBlockStyleDecoration("┃"), border) + line + foreground(markBlockStyleDecoration("┃"), border));
+		return cleanLines.map((line) => foreground("┃", border) + line + foreground("┃", border));
 	}
 
-	const top = foreground(markBlockStyleDecoration(`┏${"━".repeat(faceWidth)}┓`), border);
-	const bottom = foreground(markBlockStyleDecoration(`┗${"━".repeat(faceWidth)}┛`), border);
+	const top = foreground(`┏${"━".repeat(faceWidth)}┓`, border);
+	const bottom = foreground(`┗${"━".repeat(faceWidth)}┛`, border);
 	const middle = cleanLines.slice(1, -1).map(
-		(line) => foreground(markBlockStyleDecoration("┃"), border) + line + foreground(markBlockStyleDecoration("┃"), border),
+		(line) => foreground("┃", border) + line + foreground("┃", border),
 	);
 	return [top, ...middle, bottom];
 }
 
 function renderRail(lines: string[], accent: RGB): string[] {
-	return lines.map((line) => foreground(markBlockStyleDecoration(RAIL_GLYPH), accent) + line);
+	return lines.map((line) => foreground(RAIL_GLYPH, accent) + line);
 }
 
 function renderSpotlight(lines: string[], faceColor: RGB, semanticName: ThemeBg): string[] {
 	const active = semanticName === "toolPendingBg";
 	const accent = shade(faceColor, active ? 1.25 : 0.78);
-	return lines.map((line) => foreground(markBlockStyleDecoration("█"), accent) + line);
+	return lines.map((line) => foreground("█", accent) + line);
 }
 
 /**
