@@ -12,6 +12,7 @@
 | `delegate` | `extensions/delegate/index.ts` | 在独立 Git worktree 中启动 headless Pi RPC worker |
 | `export-md` | `extensions/export-md/index.ts` | 通过 `/export-md` 导出只包含提示和回复的 Markdown |
 | `no-italic` | `extensions/no-italic/index.ts` | 禁用 TUI 的 italic 显示样式 |
+| `pi-remote` | `extensions/pi-remote/index.ts` | 通过私人 tailnet 提供当前 TUI Session 的只读移动 Web 原型 |
 | `reply-anchor` | `extensions/reply-anchor/index.ts` | 在 agent 回复开头添加可搜索的 `§` 锚点 |
 
 每个扩展目录都有自己的最小 `package.json`，通过 `pi.extensions` 明确只加载 `./index.ts`；目录里的 helper、extension-specific test 和 fixture（例如 `bash-readable/format.ts` 和 `auto-title/auto-title.test.ts`）都是该扩展的内部源码，不会被当成独立 extension 加载。根目录的 `package.json` 通过 `pi.extensions` 声明 `./extensions`，所以安装根 package 时仍然会加载全部这些自包含单元。
@@ -205,4 +206,4 @@ npm run test:smoke
 
 ## 目录和发布范围
 
-根 `package.json` 是 umbrella package 的聚合 manifest；每个 `extensions/<name>/package.json` 是只声明 `./index.ts` 的最小独立 Pi manifest。`extensions/` 包含七个运行时 extension、各自的 helper 以及 colocated test/fixture；根 `test/` 只包含 package boundary 测试和跨 package smoke test，二者都不在 `pi.extensions` 的资源范围内。当前不发布 npm、不添加第三方 runtime dependency，也不提供会安装其他 package 的 `/setup` 命令。
+根 `package.json` 是 umbrella package 的聚合 manifest；每个 `extensions/<name>/package.json` 是只声明 `./index.ts` 的最小独立 Pi manifest。`extensions/` 包含八个运行时 extension、各自的 helper 以及 colocated test/fixture；根 `test/` 只包含 package boundary 测试和跨 package smoke test，二者都不在 `pi.extensions` 的资源范围内。当前不发布 npm、不添加第三方 runtime dependency，也不提供会安装其他 package 的 `/setup` 命令。

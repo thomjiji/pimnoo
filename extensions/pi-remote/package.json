@@ -1,0 +1,12 @@
+{
+  "name": "pimono-pi-remote",
+  "version": "0.0.0-prototype",
+  "private": true,
+  "description": "Read-only mobile web prototype for a running Pi TUI session",
+  "keywords": ["pi-package"],
+  "license": "MIT",
+  "type": "module",
+  "pi": {
+    "extensions": ["./index.ts"]
+  }
+}

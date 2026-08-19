@@ -23,6 +23,7 @@ test("declares the umbrella package and standalone package boundaries", () => {
 		"delegate/index.ts",
 		"export-md/index.ts",
 		"no-italic/index.ts",
+		"pi-remote/index.ts",
 		"reply-anchor/index.ts",
 	];
 	const discoveredEntrypoints: string[] = [];
