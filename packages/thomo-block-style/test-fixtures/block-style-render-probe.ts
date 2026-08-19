@@ -10,7 +10,7 @@ const semanticBackgroundName = "userMessageBg";
 const userMessageBackground = (text: string): string => probeTheme.bg(semanticBackgroundName, text);
 const pendingToolBackground = (text: string): string => probeTheme.bg("toolPendingBg", text);
 
-type BlockStyle = "half" | "half-hatch" | "full" | "deep" | "outline" | "rail" | "spotlight" | "off";
+type BlockStyle = "half" | "hatch" | "full" | "deep" | "outline" | "rail" | "spotlight" | "off";
 
 /** Regression probe: the real Box patch renders styles without changing terminal width. */
 export default function blockStyleRenderProbe(pi: ExtensionAPI): void {
@@ -37,18 +37,18 @@ function runBlockStyleProbe(): void {
 		throw new Error("block-style half mode did not render proportional cut-out corners");
 	}
 
-	patch.style = "half-hatch";
-	const halfHatchBox = new Box(1, 1, (text) => userMessageBackground(text));
-	halfHatchBox.addChild(new Text("x".repeat(37), 0, 0));
-	const halfHatchLines = halfHatchBox.render(40);
-	if (halfHatchLines.length !== 5 || halfHatchLines.some((line) => visibleWidth(line) !== 40)) {
-		throw new Error("block-style half-hatch mode did not reserve proportional side width");
+	patch.style = "hatch";
+	const hatchBox = new Box(1, 1, (text) => userMessageBackground(text));
+	hatchBox.addChild(new Text("x".repeat(37), 0, 0));
+	const hatchLines = hatchBox.render(40);
+	if (hatchLines.length !== 5 || hatchLines.some((line) => visibleWidth(line) !== 40)) {
+		throw new Error("block-style hatch mode did not reserve proportional side width");
 	}
-	if (halfHatchLines[0]?.includes("╲") || halfHatchLines.slice(1).some((line) => !line.includes("╲") || !line.includes("\x1b[1m")) || halfHatchLines.some((line) => /[▄▖▌▝▀▘░▚▒]/u.test(line))) {
-		throw new Error("block-style half-hatch mode did not render a bold sparse diagonal hatch");
+	if (hatchLines[0]?.includes("░") || hatchLines.slice(1).some((line) => !line.includes("░")) || hatchLines.some((line) => /[▄▖▌▝▀▘]/u.test(line))) {
+		throw new Error("block-style hatch mode did not render a unified shade texture");
 	}
-	if (halfHatchLines[0]?.includes("╲")) {
-		throw new Error("block-style half-hatch mode did not cut out the full upper-right square");
+	if (hatchLines[0]?.includes("░")) {
+		throw new Error("block-style hatch mode did not cut out the full upper-right square");
 	}
 
 	patch.style = "full";
