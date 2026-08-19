@@ -12,7 +12,7 @@ type RuntimeBox = {
 	bgFn?: (text: string) => string;
 };
 
-const SAMPLE = "pimono-block-style-sample";
+const SAMPLE = "thomo-block-style-sample";
 const BLOCK_BACKGROUNDS: ThemeBg[] = [
 	"userMessageBg",
 	"customMessageBg",

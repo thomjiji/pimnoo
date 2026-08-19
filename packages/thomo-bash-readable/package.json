@@ -1,8 +1,8 @@
 {
-  "name": "pimono-export-md",
+  "name": "thomo-bash-readable",
   "version": "0.1.0",
   "private": true,
-  "description": "Export Pi sessions to filtered Markdown",
+  "description": "Render chained Bash commands without changing execution",
   "keywords": ["pi-package"],
   "license": "MIT",
   "type": "module",

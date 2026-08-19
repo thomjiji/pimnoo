@@ -1,8 +1,8 @@
 {
-  "name": "pimono-reply-anchor",
+  "name": "thomo-auto-title",
   "version": "0.1.0",
   "private": true,
-  "description": "Add searchable anchors to Pi assistant replies",
+  "description": "Automatically name Pi sessions with short topic titles",
   "keywords": ["pi-package"],
   "license": "MIT",
   "type": "module",

@@ -12,7 +12,7 @@ const legacyPaths = [
 	["extensions/export-md.ts", "export-md.ts"],
 	["extensions/no-italic.ts", "no-italic.ts"],
 ];
-const backupRoot = join(agentDir, "extensions-disabled", "pimono");
+const backupRoot = join(agentDir, "extensions-disabled", "thomo");
 
 let moved = 0;
 for (const [sourceRelative, backupName] of legacyPaths) {
@@ -35,5 +35,5 @@ for (const [sourceRelative, backupName] of legacyPaths) {
 if (dryRun) {
 	console.log("Dry run complete. No legacy extension was moved.");
 } else {
-	console.log(moved === 0 ? "No legacy pimono extensions found." : `Moved ${moved} legacy pimono extension path(s) out of automatic discovery.`);
+	console.log(moved === 0 ? "No legacy thomo extensions found." : `Moved ${moved} legacy thomo extension path(s) out of automatic discovery.`);
 }

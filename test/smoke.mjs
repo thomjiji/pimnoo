@@ -172,7 +172,7 @@ async function startGitHttpServer(projectRoot) {
 				SERVER_PORT: String(server.address()?.port ?? ""),
 				SERVER_PROTOCOL: "HTTP/1.1",
 				GATEWAY_INTERFACE: "CGI/1.1",
-				SERVER_SOFTWARE: "pimono-smoke",
+				SERVER_SOFTWARE: "thomo-smoke",
 				SCRIPT_NAME: "",
 				REQUEST_URI: request.url ?? "/",
 				PATH_TRANSLATED: join(projectRoot, requestUrl.pathname),
@@ -242,10 +242,10 @@ async function assertCleanPackageLoads(tempRoot) {
 	const probePath = join(tempRoot, "no-italic-probe.ts");
 	await writeFile(probePath, `import { Theme, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 export default function (pi: ExtensionAPI) {
-  pi.registerCommand("pimono-no-italic-probe", { handler: (_args, ctx) => {
-    ctx.ui.notify(Theme.prototype.italic("pimono-no-italic-probe-result"), "info");
+  pi.registerCommand("thomo-no-italic-probe", { handler: (_args, ctx) => {
+    ctx.ui.notify(Theme.prototype.italic("thomo-no-italic-probe-result"), "info");
   } });
-  pi.registerCommand("pimono-tools-probe", { handler: (_args, ctx) => {
+  pi.registerCommand("thomo-tools-probe", { handler: (_args, ctx) => {
     const bashTools = pi.getAllTools().filter((tool) => tool.name === "bash").map((tool) => ({ name: tool.name, path: tool.sourceInfo.path }));
     ctx.ui.notify(JSON.stringify(bashTools), "info");
   } });
@@ -256,8 +256,8 @@ export default function (pi: ExtensionAPI) {
 		{ id: "commands", type: "get_commands" },
 		{ id: "autotitle", type: "prompt", message: "/autotitle show" },
 		{ id: "export", type: "prompt", message: "/export-md" },
-		{ id: "probe", type: "prompt", message: "/pimono-no-italic-probe" },
-		{ id: "tools", type: "prompt", message: "/pimono-tools-probe" },
+		{ id: "probe", type: "prompt", message: "/thomo-no-italic-probe" },
+		{ id: "tools", type: "prompt", message: "/thomo-tools-probe" },
 	], ["-e", probePath]);
 	assert.equal(rpc.code, 0, `Pi RPC failed:\n${rpc.stderr}\n${rpc.stdout}`);
 	assert.equal(rpc.lines.some((line) => line.type === "extension_error"), false, `Extension error:\n${rpc.stdout}`);
@@ -265,7 +265,7 @@ export default function (pi: ExtensionAPI) {
 	const packageCommands = commands.filter((command) => command.name === "autotitle" || command.name === "export-md");
 	assert.deepEqual(packageCommands.map((command) => command.name).sort(), ["autotitle", "export-md"]);
 	for (const command of packageCommands) {
-		assert.match(command.sourceInfo.path.replaceAll("\\", "/"), new RegExp(`${packageRootPattern}/extensions/[^/]+/index\\.ts$`));
+		assert.match(command.sourceInfo.path.replaceAll("\\", "/"), new RegExp(`${packageRootPattern}/packages/thomo-[^/]+/index\\.ts$`));
 		assert.equal(command.sourceInfo.origin, "package");
 	}
 	assert.equal(commands.filter((command) => command.name === "autotitle").length, 1);
@@ -275,12 +275,12 @@ export default function (pi: ExtensionAPI) {
 	assert.equal(response(rpc.lines, "export")?.success, true);
 	assert.equal(response(rpc.lines, "probe")?.success, true);
 	assert.equal(response(rpc.lines, "tools")?.success, true);
-	assert.equal(rpc.lines.some((line) => line.method === "notify" && line.message === "pimono-no-italic-probe-result"), true, "no-italic patch was not active");
+	assert.equal(rpc.lines.some((line) => line.method === "notify" && line.message === "thomo-no-italic-probe-result"), true, "no-italic patch was not active");
 	const bashToolProbe = rpc.lines.find((line) => line.method === "notify" && typeof line.message === "string" && line.message.startsWith("[{\"name\":\"bash\""));
 	assert.ok(bashToolProbe, `bash-readable did not register a bash tool: ${JSON.stringify(rpc.lines)}`);
 	const bashTools = JSON.parse(bashToolProbe.message);
 	assert.equal(bashTools.length, 1);
-	assert.match(bashTools[0].path.replaceAll("\\", "/"), new RegExp(`${packageRootPattern}/extensions/bash-readable/index\\.ts$`));
+	assert.match(bashTools[0].path.replaceAll("\\", "/"), new RegExp(`${packageRootPattern}/packages/thomo-bash-readable/index\\.ts$`));
 
 	return { agentDir, projectDir };
 }
@@ -301,7 +301,7 @@ async function assertLegacyCleanupScript(tempRoot) {
 	});
 	const remaining = await run(process.execPath, ["-e", `import { readdirSync } from "node:fs"; console.log(readdirSync(${JSON.stringify(extensionsDir)}).join("\\n"));`]);
 	assert.equal(remaining.stdout.trim(), "");
-	const backups = await run(process.execPath, ["-e", `import { readdirSync } from "node:fs"; console.log(readdirSync(${JSON.stringify(join(agentDir, "extensions-disabled", "pimono"))}).sort().join("\\n"));`]);
+	const backups = await run(process.execPath, ["-e", `import { readdirSync } from "node:fs"; console.log(readdirSync(${JSON.stringify(join(agentDir, "extensions-disabled", "thomo"))}).sort().join("\\n"));`]);
 	assert.deepEqual(backups.stdout.trim().split("\n"), ["auto-title", "bash-readable-helper", "bash-readable.ts", "export-md.ts", "no-italic.ts"]);
 }
 
@@ -351,7 +351,7 @@ export default function (pi: ExtensionAPI) {
 async function assertStandaloneExtensionLoads(tempRoot) {
 	const agentDir = join(tempRoot, "agent-standalone");
 	const projectDir = join(tempRoot, "project-standalone");
-	const extensionDir = join(root, "extensions", "auto-title");
+	const extensionDir = join(root, "packages", "thomo-auto-title");
 	await mkdir(projectDir, { recursive: true });
 	await run(PI_BIN, ["install", extensionDir], {
 		cwd: projectDir,
@@ -365,14 +365,14 @@ async function assertStandaloneExtensionLoads(tempRoot) {
 	assert.equal(commands.some((command) => command.name === "export-md"), false);
 	const autotitle = commands.find((command) => command.name === "autotitle");
 	assert.equal(autotitle?.sourceInfo.origin, "package");
-	assert.match(autotitle?.sourceInfo.path.replaceAll("\\", "/"), /extensions\/auto-title\/index\.ts$/);
+	assert.match(autotitle?.sourceInfo.path.replaceAll("\\", "/"), /packages\/thomo-auto-title\/index\.ts$/);
 }
 
 async function assertStandaloneBlockStyleLoads(tempRoot) {
 	const agentDir = join(tempRoot, "agent-standalone-block-style");
 	const projectDir = join(tempRoot, "project-standalone-block-style");
-	const extensionDir = join(root, "extensions", "block-style");
-	const probePath = join(root, "extensions", "block-style", "test-fixtures", "block-style-render-probe.ts");
+	const extensionDir = join(root, "packages", "thomo-block-style");
+	const probePath = join(root, "packages", "thomo-block-style", "test-fixtures", "block-style-render-probe.ts");
 	await mkdir(projectDir, { recursive: true });
 	await run(PI_BIN, ["install", extensionDir], {
 		cwd: projectDir,
@@ -405,7 +405,7 @@ async function assertStandaloneBlockStyleLoads(tempRoot) {
 	assert.equal(rpc.lines.some((line) => line.method === "notify" && line.message === "Usage: /block-style [half|half-hatch|full|deep|outline|rail|spotlight|off]"), true);
 	const blockStyle = commands.find((command) => command.name === "block-style");
 	assert.equal(blockStyle?.sourceInfo.origin, "package");
-	assert.match(blockStyle?.sourceInfo.path.replaceAll("\\", "/"), /extensions\/block-style\/index\.ts$/);
+	assert.match(blockStyle?.sourceInfo.path.replaceAll("\\", "/"), /packages\/thomo-block-style\/index\.ts$/);
 }
 
 async function assertLegacyCopiesAreRejected(tempRoot) {
@@ -414,7 +414,7 @@ async function assertLegacyCopiesAreRejected(tempRoot) {
 	const legacyDir = join(agentDir, "extensions", "auto-title");
 	await mkdir(projectDir, { recursive: true });
 	await mkdir(legacyDir, { recursive: true });
-	await cp(join(root, "extensions", "auto-title", "index.ts"), join(legacyDir, "index.ts"));
+	await cp(join(root, "packages", "thomo-auto-title", "index.ts"), join(legacyDir, "index.ts"));
 	await writeFile(join(legacyDir, "package.json"), JSON.stringify({ pi: { extensions: ["./index.ts"] } }));
 	await run(PI_BIN, ["install", root], { cwd: projectDir, env: { ...piEnv, PI_CODING_AGENT_DIR: agentDir, PI_OFFLINE: "1" } });
 	const rpc = await runRpc(agentDir, projectDir, [{ id: "commands", type: "get_commands" }]);
@@ -429,7 +429,7 @@ async function assertLegacyCopiesAreRejected(tempRoot) {
 	const exportProjectDir = join(tempRoot, "project-legacy-export");
 	await mkdir(join(exportAgentDir, "extensions"), { recursive: true });
 	await mkdir(exportProjectDir, { recursive: true });
-	await cp(join(root, "extensions", "export-md", "index.ts"), join(exportAgentDir, "extensions", "export-md.ts"));
+	await cp(join(root, "packages", "thomo-export-md", "index.ts"), join(exportAgentDir, "extensions", "export-md.ts"));
 	await run(PI_BIN, ["install", root], { cwd: exportProjectDir, env: { ...piEnv, PI_CODING_AGENT_DIR: exportAgentDir, PI_OFFLINE: "1" } });
 	const exportRpc = await runRpc(exportAgentDir, exportProjectDir, [{ id: "commands", type: "get_commands" }]);
 	assert.equal(exportRpc.code, 0, `Pi should report duplicate export commands without crashing:\n${exportRpc.stderr}`);
@@ -440,9 +440,9 @@ async function assertLegacyCopiesAreRejected(tempRoot) {
 	const bashProjectDir = join(tempRoot, "project-legacy-bash");
 	await mkdir(join(bashAgentDir, "extensions", "bash-readable"), { recursive: true });
 	await mkdir(bashProjectDir, { recursive: true });
-	const legacyBash = await readFile(join(root, "extensions", "bash-readable", "index.ts"), "utf8");
+	const legacyBash = await readFile(join(root, "packages", "thomo-bash-readable", "index.ts"), "utf8");
 	await writeFile(join(bashAgentDir, "extensions", "bash-readable.ts"), legacyBash.replace("./format.ts", "./bash-readable/format.ts"));
-	await cp(join(root, "extensions", "bash-readable", "format.ts"), join(bashAgentDir, "extensions", "bash-readable", "format.ts"));
+	await cp(join(root, "packages", "thomo-bash-readable", "format.ts"), join(bashAgentDir, "extensions", "bash-readable", "format.ts"));
 	await run(PI_BIN, ["install", root], { cwd: bashProjectDir, env: { ...piEnv, PI_CODING_AGENT_DIR: bashAgentDir, PI_OFFLINE: "1" } });
 	const bashRpc = await runRpc(bashAgentDir, bashProjectDir, [{ id: "commands", type: "get_commands" }]);
 	assert.notEqual(bashRpc.code, 0);
@@ -452,15 +452,15 @@ async function assertLegacyCopiesAreRejected(tempRoot) {
 async function assertGitUpdates(tempRoot) {
 	const sourceWork = join(tempRoot, "git-source");
 	const bareRoot = join(tempRoot, "git-remote");
-	const bareRepo = join(bareRoot, "pimono", "pimono.git");
+	const bareRepo = join(bareRoot, "thomo", "thomo.git");
 	const agentDir = join(tempRoot, "agent-git");
 	const projectDir = join(tempRoot, "project-git");
-	await mkdir(join(bareRoot, "pimono"), { recursive: true });
+	await mkdir(join(bareRoot, "thomo"), { recursive: true });
 	await mkdir(projectDir, { recursive: true });
 	await copyPackage(root, sourceWork);
 	await run("git", ["init", "-b", "main"], { cwd: sourceWork });
-	await run("git", ["config", "user.email", "pimono-smoke@example.invalid"], { cwd: sourceWork });
-	await run("git", ["config", "user.name", "pimono smoke test"], { cwd: sourceWork });
+	await run("git", ["config", "user.email", "thomo-smoke@example.invalid"], { cwd: sourceWork });
+	await run("git", ["config", "user.name", "thomo smoke test"], { cwd: sourceWork });
 	await run("git", ["add", "."], { cwd: sourceWork });
 	await run("git", ["commit", "-m", "test: initial package"], { cwd: sourceWork });
 	await run("git", ["init", "--bare", "--initial-branch=main", bareRepo], { cwd: bareRoot });
@@ -470,13 +470,13 @@ async function assertGitUpdates(tempRoot) {
 
 	const gitServer = await startGitHttpServer(bareRoot);
 	try {
-		const sourceUrl = `http://127.0.0.1:${gitServer.port}/pimono/pimono.git`;
+		const sourceUrl = `http://127.0.0.1:${gitServer.port}/thomo/thomo.git`;
 		await run(PI_BIN, ["install", sourceUrl], { cwd: projectDir, env: { ...piEnv, PI_CODING_AGENT_DIR: agentDir } });
 		const settings = JSON.parse(await readFile(join(agentDir, "settings.json"), "utf8"));
 		assert.deepEqual(settings.packages, [sourceUrl], "the update source must remain unpinned");
 
-		const marker = "pimono update marker";
-		const exportPath = join(sourceWork, "extensions", "export-md", "index.ts");
+		const marker = "thomo update marker";
+		const exportPath = join(sourceWork, "packages", "thomo-export-md", "index.ts");
 		const exportSource = await readFile(exportPath, "utf8");
 		await writeFile(exportPath, exportSource.replace(
 			"Nothing to export - no prompts or replies in this session yet",
@@ -488,7 +488,7 @@ async function assertGitUpdates(tempRoot) {
 		await run("git", ["push", "origin", "main"], { cwd: sourceWork });
 		await run(PI_BIN, ["update", "--extensions"], { cwd: projectDir, env: { ...piEnv, PI_CODING_AGENT_DIR: agentDir } });
 
-		const managedRoot = join(agentDir, "git", "127.0.0.1", "pimono", "pimono");
+		const managedRoot = join(agentDir, "git", "127.0.0.1", "thomo", "thomo");
 		assert.equal((await run("git", ["rev-parse", "HEAD"], { cwd: managedRoot })).stdout.trim(), newHead);
 		const updatedRpc = await runRpc(agentDir, projectDir, [
 			{ id: "commands", type: "get_commands" },
@@ -502,7 +502,7 @@ async function assertGitUpdates(tempRoot) {
 	}
 }
 
-const tempRoot = await mkdtemp(join(tmpdir(), "pimono-smoke-"));
+const tempRoot = await mkdtemp(join(tmpdir(), "thomo-smoke-"));
 try {
 	await assertCleanPackageLoads(tempRoot);
 	await assertStandaloneExtensionLoads(tempRoot);
@@ -511,7 +511,7 @@ try {
 	await assertLegacyCleanupScript(tempRoot);
 	await assertAutoTitleBehavior(tempRoot);
 	await assertGitUpdates(tempRoot);
-	console.log("pimono package smoke tests passed: clean discovery, duplicate detection, and unpinned Git update.");
+	console.log("thomo package smoke tests passed: clean discovery, duplicate detection, and unpinned Git update.");
 } finally {
 	await rm(tempRoot, { recursive: true, force: true });
 }

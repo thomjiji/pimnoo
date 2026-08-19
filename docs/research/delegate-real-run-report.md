@@ -2,9 +2,9 @@
 
 ## 报告范围
 
-本报告复盘了一次真实的 `delegate` 调用，目的是判断两个 headless worker 的运行情况，以及父会话在等待过程中看起来“卡住”的原因。后来确认，用户当时并不知道父会话正在等待 worker 自然结束，因此主动中止了父会话操作并通过 `/resume` 切换到子会话查看；这次主动取消本身是预期交互，不应被误判为 delegate 自动失败。检查对象包括父会话 JSONL、两个 worker 会话 JSONL、worker worktree、`extensions/delegate/` 实现和现有测试。
+本报告复盘了一次真实的 `delegate` 调用，目的是判断两个 headless worker 的运行情况，以及父会话在等待过程中看起来“卡住”的原因。后来确认，用户当时并不知道父会话正在等待 worker 自然结束，因此主动中止了父会话操作并通过 `/resume` 切换到子会话查看；这次主动取消本身是预期交互，不应被误判为 delegate 自动失败。检查对象包括父会话 JSONL、两个 worker 会话 JSONL、worker worktree、`packages/thomo-delegate/` 实现和现有测试。
 
-本次任务只读调研 Pi 的 `Ctrl+O` 行为，没有要求 worker 修改仓库代码。
+本次任务只读调研 Pi 的 `Ctrl+O` 行为，没有要求 worker 修改仓库代码。证据索引中的 `pimnoo` 路径来自更名前的真实 session 和 worktree，按原值保留。
 
 ## 本次调用
 
@@ -35,7 +35,7 @@
 }
 ```
 
-代码层面还有一个值得修正的类型问题：`extensions/delegate/index.ts:18-24` 中的 `DelegateParameters.tasks` 类型没有声明 `maxTurns`、`softTurnThreshold` 和 `timeoutMs`，虽然运行时对象仍然会保留这些字段并传给 supervisor，但类型定义没有反映实际 schema。
+代码层面还有一个值得修正的类型问题：`packages/thomo-delegate/index.ts:18-24` 中的 `DelegateParameters.tasks` 类型没有声明 `maxTurns`、`softTurnThreshold` 和 `timeoutMs`，虽然运行时对象仍然会保留这些字段并传给 supervisor，但类型定义没有反映实际 schema。
 
 ## Worker 1：正常完成
 
@@ -85,14 +85,14 @@ worker 2: stopped
 
 从用户取消到 delegate 返回约 126 秒。这与代码实现相符：
 
-- `extensions/delegate/supervisor.ts:302-310` 的 wait abort handler 会顺序调用 `abortAndTerminate()`。
-- `extensions/delegate/supervisor.ts:637-642` 的 `abortAndTerminate()` 首先 `await worker.rpc.request({ type: "abort" })`。
-- `extensions/delegate/supervisor.ts:643-644` 虽然注释写着“Bounded grace”，但 300 ms 的 `waitForStatus()` 只发生在 abort RPC 请求返回之后。
+- `packages/thomo-delegate/supervisor.ts:302-310` 的 wait abort handler 会顺序调用 `abortAndTerminate()`。
+- `packages/thomo-delegate/supervisor.ts:637-642` 的 `abortAndTerminate()` 首先 `await worker.rpc.request({ type: "abort" })`。
+- `packages/thomo-delegate/supervisor.ts:643-644` 虽然注释写着“Bounded grace”，但 300 ms 的 `waitForStatus()` 只发生在 abort RPC 请求返回之后。
 - Pi RPC server 的 `rpc-mode.js` 对 `abort` 执行 `await session.abort()`；`AgentSession.abort()` 又会 `await waitForIdle()`。如果 worker 正在等待 provider/model 请求结束，abort response 本身可能长时间不返回。
 
 因此，当前所谓的 300 ms bounded grace 不能限制整个 abort 流程，只能限制 abort response 已经返回后的 settle 等待阶段。真实运行中，worker 正在模型调用或模型调用迟迟没有结束时，父会话的取消处理可能被一个无超时的 `rpc.request({ abort })` 延迟。
 
-这不是本次“原始 wait 卡住”的证据，因为原始 wait 是按设计等待 worker 结束；它是用户主动取消之后暴露出的终止路径健壮性问题。现有 fake worker 测试没有暴露它，因为 `extensions/delegate/test-fixtures/fake-rpc-worker.mjs` 会立即响应 `abort`，随后才释放 hold。
+这不是本次“原始 wait 卡住”的证据，因为原始 wait 是按设计等待 worker 结束；它是用户主动取消之后暴露出的终止路径健壮性问题。现有 fake worker 测试没有暴露它，因为 `packages/thomo-delegate/test-fixtures/fake-rpc-worker.mjs` 会立即响应 `abort`，随后才释放 hold。
 
 ## 其他观察
 
@@ -106,7 +106,7 @@ worker 2: stopped
 
 ### 测试覆盖缺口
 
-现有 `extensions/delegate/delegate.test.ts:552-571` 覆盖了父取消 wait 会停止被等待 worker，但 fake worker 的 abort response 是立即的，没有覆盖下面的真实情况：
+现有 `packages/thomo-delegate/delegate.test.ts:552-571` 覆盖了父取消 wait 会停止被等待 worker，但 fake worker 的 abort response 是立即的，没有覆盖下面的真实情况：
 
 - abort RPC 永远不返回。
 - abort RPC 延迟数秒后才返回。
@@ -137,7 +137,7 @@ worker 2: stopped
 - 父会话：`/root/.pi/agent/sessions/--workspace-pimnoo--/2026-08-15T09-33-53-357Z_01a004c5-494d-79f0-aa7f-8b9eed83eb23.jsonl`。
 - Worker 1 会话：`/root/.pi/agent/sessions/--workspace-pimnoo--/2026-08-15T09-38-51-885Z_01a004c9-d76d-778f-b4d6-1ef5c70bcf68.jsonl`。
 - Worker 2 会话：`/root/.pi/agent/sessions/--workspace-pimnoo--/2026-08-15T09-38-52-641Z_01a004c9-da61-7131-9b80-8c9a5dd82bf3.jsonl`。
-- supervisor 的取消路径：`extensions/delegate/supervisor.ts:288-315,632-676`。
-- delegate 参数 schema 和类型：`extensions/delegate/index.ts:7-24,123-129`。
-- 现有 parent cancellation 测试：`extensions/delegate/delegate.test.ts:552-571`。
+- supervisor 的取消路径：`packages/thomo-delegate/supervisor.ts:288-315,632-676`。
+- delegate 参数 schema 和类型：`packages/thomo-delegate/index.ts:7-24,123-129`。
+- 现有 parent cancellation 测试：`packages/thomo-delegate/delegate.test.ts:552-571`。
 - Pi RPC abort 实现：`/usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/modes/rpc/rpc-mode.js:298-337` 和 `dist/core/agent-session.js:1168-1174`。

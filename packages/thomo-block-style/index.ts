@@ -21,7 +21,7 @@ type PatchState = {
 	patchedRender: (width: number) => string[];
 };
 
-const PATCH_MARKER = Symbol.for("pimnoo.block-style");
+const PATCH_MARKER = Symbol.for("thomo.block-style");
 
 function installPatch(owner: object): PatchState {
 	const prototype = Box.prototype as typeof Box.prototype & Record<PropertyKey, unknown>;

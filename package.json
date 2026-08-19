@@ -1,25 +1,27 @@
 {
-  "name": "pimono",
+  "name": "thomo",
   "version": "0.1.0",
   "private": true,
-  "description": "Personal Pi extensions with an umbrella package and standalone extension packages",
+  "description": "Personal Pi behavior modifications and enhancements",
   "keywords": ["pi-package"],
   "license": "MIT",
   "type": "module",
+  "workspaces": ["packages/*"],
   "files": [
     "README.md",
     "LICENSE",
-    "extensions",
+    "docs",
+    "packages",
     "package.json",
     "scripts",
     "test"
   ],
   "pi": {
-    "extensions": ["./extensions"]
+    "extensions": ["./packages/*/index.ts"]
   },
   "scripts": {
-    "test": "node --experimental-strip-types --test test/*.test.ts extensions/*/*.test.ts && node test/smoke.mjs",
-    "test:unit": "node --experimental-strip-types --test test/*.test.ts extensions/*/*.test.ts",
+    "test": "node --experimental-strip-types --test test/*.test.ts packages/*/*.test.ts && node test/smoke.mjs",
+    "test:unit": "node --experimental-strip-types --test test/*.test.ts packages/*/*.test.ts",
     "test:smoke": "node test/smoke.mjs",
     "typecheck": "node scripts/typecheck.mjs"
   }

@@ -1,6 +1,6 @@
 # auto-title 工作原理
 
-为没有手动名称的 session 生成英文短标题，全部实现位于 `extensions/auto-title/index.ts`。
+为没有手动名称的 session 生成英文短标题，全部实现位于 `packages/thomo-auto-title/index.ts`。
 
 ## 触发时机
 

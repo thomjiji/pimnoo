@@ -22,7 +22,7 @@ export default function blockStyleRenderProbe(pi: ExtensionAPI): void {
 
 function runBlockStyleProbe(): void {
 	const patch = (Box.prototype as typeof Box.prototype & Record<PropertyKey, unknown>)[
-		Symbol.for("pimnoo.block-style")
+		Symbol.for("thomo.block-style")
 	] as { style: BlockStyle } | undefined;
 	if (!patch) throw new Error("block-style patch marker is missing");
 	if (patch.style !== "half") throw new Error("block-style did not default to half style");

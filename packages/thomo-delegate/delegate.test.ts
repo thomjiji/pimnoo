@@ -18,7 +18,7 @@ async function git(cwd: string, ...args: string[]) {
 }
 
 async function createRepository() {
-	const directory = await mkdtemp(join(tmpdir(), "pimono-delegate-repo-"));
+	const directory = await mkdtemp(join(tmpdir(), "thomo-delegate-repo-"));
 	await git(directory, "init", "-q");
 	await git(directory, "config", "user.email", "delegate-test@example.invalid");
 	await git(directory, "config", "user.name", "delegate test");
@@ -67,7 +67,7 @@ interface Harness {
 
 async function createHarness(): Promise<Harness> {
 	const repository = await createRepository();
-	const temporary = await mkdtemp(join(tmpdir(), "pimono-delegate-ctl-"));
+	const temporary = await mkdtemp(join(tmpdir(), "thomo-delegate-ctl-"));
 	const sessionDir = join(temporary, "sessions");
 	const logPath = join(temporary, "rpc-log.jsonl");
 	const parentSession = await createParentSession(sessionDir, repository);
@@ -96,7 +96,7 @@ async function startTasks(harness: Harness, tasks: Parameters<WorkerSupervisor["
 
 test("starts multiple isolated RPC workers with persistent child sessions", async () => {
 	const repository = await createRepository();
-	const temporary = await mkdtemp(join(tmpdir(), "pimono-delegate-test-"));
+	const temporary = await mkdtemp(join(tmpdir(), "thomo-delegate-test-"));
 	const sessionDir = join(temporary, "sessions");
 	const logPath = join(temporary, "rpc-log.jsonl");
 	const parentSession = await createParentSession(sessionDir, repository);
@@ -179,7 +179,7 @@ test("starts multiple isolated RPC workers with persistent child sessions", asyn
 
 test("rejects a dirty parent before creating any worktree or worker", async () => {
 	const repository = await createRepository();
-	const temporary = await mkdtemp(join(tmpdir(), "pimono-delegate-dirty-"));
+	const temporary = await mkdtemp(join(tmpdir(), "thomo-delegate-dirty-"));
 	const sessionDir = join(temporary, "sessions");
 	const logPath = join(temporary, "rpc-log.jsonl");
 	await writeFile(join(repository, "README.md"), "uncommitted change\n");

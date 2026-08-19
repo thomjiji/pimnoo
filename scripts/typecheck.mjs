@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const extensionRoot = join(root, "extensions");
+const packagesRoot = join(root, "packages");
 const files = [];
 
 function collect(dir) {
@@ -15,7 +15,7 @@ function collect(dir) {
 	}
 }
 
-collect(extensionRoot);
+collect(packagesRoot);
 for (const file of files) {
 	const result = spawnSync(process.execPath, ["--experimental-strip-types", "--check", file], {
 		cwd: root,
@@ -27,4 +27,4 @@ for (const file of files) {
 	}
 }
 
-console.log(`Checked ${files.length} TypeScript files under extensions/ for syntax.`);
+console.log(`Checked ${files.length} TypeScript files under packages/ for syntax.`);
