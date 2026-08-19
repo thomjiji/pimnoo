@@ -1,5 +1,5 @@
 import { Theme, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Box, Text, visibleWidth } from "@earendil-works/pi-tui";
+import { Box, Text, TuiAltScreen, visibleWidth } from "@earendil-works/pi-tui";
 
 const probeTheme = new Theme(
 	{ text: "", thinkingXhigh: "" } as ConstructorParameters<typeof Theme>[0],
@@ -16,11 +16,11 @@ type BlockStyle = "half" | "hatch" | "full" | "deep" | "outline" | "rail" | "spo
 export default function blockStyleRenderProbe(pi: ExtensionAPI): void {
 	pi.registerCommand("block-style-render-probe", {
 		description: "Run the block-style render probe",
-		handler: () => runBlockStyleProbe(),
+		handler: async () => runBlockStyleProbe(),
 	});
 }
 
-function runBlockStyleProbe(): void {
+async function runBlockStyleProbe(): Promise<void> {
 	const patch = (Box.prototype as typeof Box.prototype & Record<PropertyKey, unknown>)[
 		Symbol.for("thomo.block-style")
 	] as { style: BlockStyle } | undefined;
@@ -33,8 +33,22 @@ function runBlockStyleProbe(): void {
 	if (halfLines.length !== 5 || halfLines.some((line) => visibleWidth(line) !== 40)) {
 		throw new Error("block-style half mode did not reserve proportional side width");
 	}
-	if (!halfLines[0]?.includes("▄▖") || !halfLines.at(-1)?.includes("▝") || !halfLines.at(-1)?.includes("▘")) {
-		throw new Error("block-style half mode did not render proportional cut-out corners");
+	if (halfLines.some((line) => /[▄▖▌▝▀▘]/u.test(line))) {
+		throw new Error("block-style half mode leaked decorative glyphs into selectable text");
+	}
+	const copyProbe = Object.create(TuiAltScreen.prototype) as Record<string, unknown>;
+	copyProbe.previousScreen = halfLines;
+	copyProbe.selectionAnchor = { row: 0, col: 0 };
+	copyProbe.selectionFocus = { row: halfLines.length - 1, col: 999, boundary: true };
+	copyProbe.flashes = { flash: () => undefined };
+	let copiedHalfText = "";
+	copyProbe.copySelection = async (text: string) => {
+		copiedHalfText = text;
+		return true;
+	};
+	await (copyProbe.copySelectionToClipboard as () => Promise<void>)();
+	if (/[▄▖▌▝▀▘]/u.test(copiedHalfText)) {
+		throw new Error("block-style half mode leaked decorative glyphs into native copy output");
 	}
 
 	patch.style = "hatch";

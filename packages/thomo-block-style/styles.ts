@@ -21,7 +21,6 @@ const FULL_SIDE_WIDTH = 3;
 const HALF_SIDE_WIDTH = 2;
 const RAIL_WIDTH = 1;
 const RAIL_GLYPH = "█";
-const HALF_TOP_CUTOUT = "▄▖";
 const HATCH_GLYPH = "░";
 
 function renderFull(lines: string[], faceWidth: number, shadow: RGB): string[] {
@@ -34,15 +33,13 @@ function renderFull(lines: string[], faceWidth: number, shadow: RGB): string[] {
 	];
 }
 
+/** Keep depth decoration in ANSI backgrounds so native TUI selection copy sees only spaces. */
 function renderHalf(lines: string[], faceWidth: number, shadow: RGB): string[] {
 	const [firstLine, ...remainingLines] = lines;
 	if (!firstLine) return lines;
-	const bottom = "▝" + "▀".repeat(Math.max(0, faceWidth - 1)) + "▘";
-	return [
-		firstLine + foreground(HALF_TOP_CUTOUT, shadow),
-		...remainingLines.map((line) => line + background(" ", shadow) + foreground("▌", shadow)),
-		" " + foreground(bottom, shadow),
-	];
+	const side = background(" ".repeat(HALF_SIDE_WIDTH), shadow);
+	const bottom = background(" ".repeat(faceWidth), shadow);
+	return [firstLine + side, ...remainingLines.map((line) => line + side), "  " + bottom];
 }
 
 function renderHatch(lines: string[], faceWidth: number, shadow: RGB): string[] {
