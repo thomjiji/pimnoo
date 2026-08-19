@@ -36,6 +36,9 @@ async function runBlockStyleProbe(): Promise<void> {
 	if (halfLines.some((line) => /[▄▖▌▝▀▘]/u.test(line))) {
 		throw new Error("block-style half mode leaked decorative glyphs into selectable text");
 	}
+	if (!halfLines[0]?.endsWith("  ")) {
+		throw new Error("block-style half mode did not cut out the upper-right square");
+	}
 	const copyProbe = Object.create(TuiAltScreen.prototype) as Record<string, unknown>;
 	copyProbe.previousScreen = halfLines;
 	copyProbe.selectionAnchor = { row: 0, col: 0 };

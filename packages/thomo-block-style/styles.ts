@@ -37,9 +37,10 @@ function renderFull(lines: string[], faceWidth: number, shadow: RGB): string[] {
 function renderHalf(lines: string[], faceWidth: number, shadow: RGB): string[] {
 	const [firstLine, ...remainingLines] = lines;
 	if (!firstLine) return lines;
+	const top = " ".repeat(HALF_SIDE_WIDTH); // Preserve the unstyled upper-right cutout.
 	const side = background(" ".repeat(HALF_SIDE_WIDTH), shadow);
 	const bottom = background(" ".repeat(faceWidth), shadow);
-	return [firstLine + side, ...remainingLines.map((line) => line + side), "  " + bottom];
+	return [firstLine + top, ...remainingLines.map((line) => line + side), "  " + bottom];
 }
 
 function renderHatch(lines: string[], faceWidth: number, shadow: RGB): string[] {
