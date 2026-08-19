@@ -22,7 +22,7 @@ const HALF_SIDE_WIDTH = 2;
 const RAIL_WIDTH = 1;
 const RAIL_GLYPH = "█";
 const HALF_TOP_CUTOUT = "▄▖";
-const HALF_HATCH_GLYPH = "░";
+const HALF_HATCH_GLYPH = "▚";
 
 function renderFull(lines: string[], faceWidth: number, shadow: RGB): string[] {
 	const [firstLine, ...remainingLines] = lines;
