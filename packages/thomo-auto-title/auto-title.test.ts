@@ -18,6 +18,13 @@ test("normalizes generated titles to sentence case and a bounded length", () => 
 	assert.equal(cleanTitle("A".repeat(80))?.length, 40);
 });
 
+test("clips long titles at a word boundary", () => {
+	assert.equal(
+		cleanTitle("Improve the authentication flow for legacy users"),
+		"Improve the authentication flow for",
+	);
+});
+
 test("preserves proper nouns when the model already uses sentence case", () => {
 	assert.equal(cleanTitle("Using ChatGPT for a quick fix"), "Using ChatGPT for a quick fix");
 	assert.equal(cleanTitle("Set up TypeScript in VS Code"), "Set up TypeScript in VS Code");
@@ -59,7 +66,7 @@ test("clips long messages at paragraph boundaries within the sample budget", () 
 });
 
 test("formats persisted session timestamps and rejects invalid dates", () => {
-	assert.equal(formatSessionTimestamp("2026-08-12T14:18:03.941Z"), "2608121418");
+	assert.equal(formatSessionTimestamp("2026-08-12T14:18:03.941Z"), "2026-08-12 14:18");
 	assert.equal(formatSessionTimestamp("not a timestamp"), undefined);
 });
 

@@ -61,7 +61,8 @@ export const formatSessionTimestamp = (timestamp: string): string | undefined =>
 		return undefined;
 	}
 	const pad = (value: number) => String(value).padStart(2, "0");
-	return `${String(date.getFullYear()).slice(-2)}${pad(date.getMonth() + 1)}${pad(date.getDate())}${pad(date.getHours())}${pad(date.getMinutes())}`;
+	const year = String(date.getFullYear()).padStart(4, "0");
+	return `${year}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 };
 
 export const extractText = (content: unknown): string => {
@@ -204,7 +205,11 @@ export const cleanTitle = (raw: string): string | undefined => {
 		return undefined;
 	}
 	if (t.length > MAX_TITLE_CHARS) {
-		t = t.slice(0, MAX_TITLE_CHARS).trimEnd();
+		const clipped = t.slice(0, MAX_TITLE_CHARS);
+		const lastSpace = clipped.lastIndexOf(" ");
+		// Prefer a complete word. A single word longer than the limit is the
+		// only case where a hard character cut is unavoidable.
+		t = (lastSpace > 0 ? clipped.slice(0, lastSpace) : clipped).trimEnd();
 	}
 	return t;
 };
@@ -357,7 +362,8 @@ export default function (pi: ExtensionAPI) {
 			"",
 			"Rules:",
 			"- Output ONLY the title text, nothing else. No explanations, no quotes, no trailing period.",
-			"- At most 40 characters.",
+			"- Keep the title at or below 40 characters, including spaces; count before sending.",
+			"- Prefer 30-36 characters and complete words; rewrite a long draft instead of relying on truncation.",
 			"- Use sentence case, not title case.",
 			"- ALWAYS write the title in English using ASCII characters only, even if the conversation is in another language.",
 			"- No emoji, no markdown formatting.",
