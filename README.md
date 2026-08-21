@@ -8,7 +8,7 @@
 
 | 插件 | 用途 |
 | --- | --- |
-| [`thomo-auto-title`](docs/auto-title.md) | 给每个 session 自动生成一个英文短标题 |
+| [`thomo-auto-title`](docs/auto-title.md) | 为没有手动名称的 session 生成英文短标题 |
 | [`thomo-bash-readable`](packages/thomo-bash-readable/) | 调整 Bash 工具的显示格式 |
 | [`thomo-block-style`](packages/thomo-block-style/) | 为语义背景块增加可切换的样式 |
 | [`thomo-export-md`](packages/thomo-export-md/) | 通过 `/export-md` 导出对话 Markdown |

@@ -1,0 +1,3 @@
+# Keep one repository-wide text representation across Windows and Linux.
+# Binary files detected by Git remain byte-for-byte unchanged.
+* text=auto eol=lf
