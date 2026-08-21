@@ -249,6 +249,9 @@ export default function (pi: ExtensionAPI) {
     const bashTools = pi.getAllTools().filter((tool) => tool.name === "bash").map((tool) => ({ name: tool.name, path: tool.sourceInfo.path }));
     ctx.ui.notify(JSON.stringify(bashTools), "info");
   } });
+  pi.registerCommand("thomo-delegate-probe", { handler: (_args, ctx) => {
+    ctx.ui.notify(String(pi.getAllTools().some((tool) => tool.name === "delegate")), "info");
+  } });
 }
 `);
 
@@ -258,6 +261,7 @@ export default function (pi: ExtensionAPI) {
 		{ id: "export", type: "prompt", message: "/export-md" },
 		{ id: "probe", type: "prompt", message: "/thomo-no-italic-probe" },
 		{ id: "tools", type: "prompt", message: "/thomo-tools-probe" },
+		{ id: "delegate", type: "prompt", message: "/thomo-delegate-probe" },
 	], ["-e", probePath]);
 	assert.equal(rpc.code, 0, `Pi RPC failed:\n${rpc.stderr}\n${rpc.stdout}`);
 	assert.equal(rpc.lines.some((line) => line.type === "extension_error"), false, `Extension error:\n${rpc.stdout}`);
@@ -275,7 +279,9 @@ export default function (pi: ExtensionAPI) {
 	assert.equal(response(rpc.lines, "export")?.success, true);
 	assert.equal(response(rpc.lines, "probe")?.success, true);
 	assert.equal(response(rpc.lines, "tools")?.success, true);
+	assert.equal(response(rpc.lines, "delegate")?.success, true);
 	assert.equal(rpc.lines.some((line) => line.method === "notify" && line.message === "thomo-no-italic-probe-result"), true, "no-italic patch was not active");
+	assert.equal(rpc.lines.some((line) => line.method === "notify" && line.message === "false"), true, "delegate tool was loaded");
 	const bashToolProbe = rpc.lines.find((line) => line.method === "notify" && typeof line.message === "string" && line.message.startsWith("[{\"name\":\"bash\""));
 	assert.ok(bashToolProbe, `bash-readable did not register a bash tool: ${JSON.stringify(rpc.lines)}`);
 	const bashTools = JSON.parse(bashToolProbe.message);
@@ -283,6 +289,33 @@ export default function (pi: ExtensionAPI) {
 	assert.match(bashTools[0].path.replaceAll("\\", "/"), new RegExp(`${packageRootPattern}/packages/thomo-bash-readable/index\\.ts$`));
 
 	return { agentDir, projectDir };
+}
+
+async function assertStandaloneDelegateIsDisabled(tempRoot) {
+	const agentDir = join(tempRoot, "agent-standalone-delegate");
+	const projectDir = join(tempRoot, "project-standalone-delegate");
+	const extensionDir = join(root, "packages", "thomo-delegate");
+	const probePath = join(tempRoot, "delegate-probe.ts");
+	await mkdir(projectDir, { recursive: true });
+	await writeFile(probePath, `import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+export default function (pi: ExtensionAPI) {
+  pi.registerCommand("thomo-delegate-probe", { handler: (_args, ctx) => {
+    ctx.ui.notify(String(pi.getAllTools().some((tool) => tool.name === "delegate")), "info");
+  } });
+}
+`);
+	await run(PI_BIN, ["install", extensionDir], { cwd: projectDir, env: { ...piEnv, PI_CODING_AGENT_DIR: agentDir, PI_OFFLINE: "1" } });
+	const rpc = await runRpc(agentDir, projectDir, [
+		{ id: "commands", type: "get_commands" },
+		{ id: "delegate", type: "prompt", message: "/thomo-delegate-probe" },
+	], ["-e", probePath]);
+	assert.equal(rpc.code, 0, `Standalone delegate package failed to load:
+${rpc.stderr}
+${rpc.stdout}`);
+	assert.equal(rpc.lines.some((line) => line.type === "extension_error"), false, `Standalone delegate package error:
+${rpc.stdout}`);
+	assert.equal(response(rpc.lines, "delegate")?.success, true);
+	assert.equal(rpc.lines.some((line) => line.method === "notify" && line.message === "false"), true, "delegate tool was loaded from standalone package");
 }
 
 async function assertLegacyCleanupScript(tempRoot) {
@@ -507,6 +540,7 @@ try {
 	await assertCleanPackageLoads(tempRoot);
 	await assertStandaloneExtensionLoads(tempRoot);
 	await assertStandaloneBlockStyleLoads(tempRoot);
+	await assertStandaloneDelegateIsDisabled(tempRoot);
 	await assertLegacyCopiesAreRejected(tempRoot);
 	await assertLegacyCleanupScript(tempRoot);
 	await assertAutoTitleBehavior(tempRoot);

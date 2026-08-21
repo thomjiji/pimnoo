@@ -17,7 +17,7 @@
     "test"
   ],
   "pi": {
-    "extensions": ["./packages/*/index.ts"]
+    "extensions": ["./packages/*/index.ts", "!packages/thomo-delegate/index.ts"]
   },
   "scripts": {
     "test": "node --experimental-strip-types --test test/*.test.ts packages/*/*.test.ts && node test/smoke.mjs",

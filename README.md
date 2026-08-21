@@ -11,10 +11,11 @@
 | [`thomo-auto-title`](docs/auto-title.md) | 给每个 session 自动生成一个英文短标题 |
 | [`thomo-bash-readable`](packages/thomo-bash-readable/) | 调整 Bash 工具的显示格式 |
 | [`thomo-block-style`](packages/thomo-block-style/) | 为语义背景块增加可切换的样式 |
-| [`thomo-delegate`](docs/delegate.md) | 在独立 Git worktree 中启动 headless Pi RPC worker |
 | [`thomo-export-md`](packages/thomo-export-md/) | 通过 `/export-md` 导出对话 Markdown |
 | [`thomo-no-italic`](packages/thomo-no-italic/) | 禁用 TUI 的 italic 样式 |
 | [`thomo-reply-anchor`](packages/thomo-reply-anchor/) | 在 agent 回复开头添加可搜索的 `§` 锚点 |
+
+`thomo-delegate` 已停用，不会随 umbrella package 或独立 package 加载；相关源码和文档仅保留作历史参考。
 
 ## 安装
 

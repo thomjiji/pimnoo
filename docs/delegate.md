@@ -1,5 +1,7 @@
 # Delegate worker
 
+`thomo-delegate` 已停用，不会随 umbrella package 或独立 package 加载。本文仅保留作历史参考。
+
 主 Pi 通过 `delegate` tool 管理无界面 worker：`action: "start"` 一次启动一个或多个 worker，每个 task 至少提供一个明确的 `prompt`，也可以提供 `name`、`role`、`model` 和 `thinkingLevel`；启动之后可以按 task ID 继续控制它们。
 
 - `steer`：向正在运行的 worker 发送 steering message，在下一个模型调用前到达；worker 空闲时应使用 `follow_up`。

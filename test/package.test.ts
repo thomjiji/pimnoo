@@ -13,7 +13,7 @@ test("declares the umbrella workspace and standalone package boundaries", () => 
 	assert.ok(manifest.keywords.includes("pi-package"));
 	assert.ok(manifest.files.includes("LICENSE"));
 	assert.deepEqual(manifest.workspaces, ["packages/*"]);
-	assert.deepEqual(manifest.pi.extensions, ["./packages/*/index.ts"]);
+	assert.deepEqual(manifest.pi.extensions, ["./packages/*/index.ts", "!packages/thomo-delegate/index.ts"]);
 	assert.equal(manifest.dependencies, undefined);
 	assert.equal(manifest.devDependencies, undefined);
 
@@ -33,7 +33,7 @@ test("declares the umbrella workspace and standalone package boundaries", () => 
 		const packageManifest = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8"));
 		assert.equal(packageManifest.name, packageName);
 		assert.equal(packageManifest.private, true);
-		assert.deepEqual(packageManifest.pi?.extensions, ["./index.ts"]);
+		assert.deepEqual(packageManifest.pi?.extensions, packageName === "thomo-delegate" ? [] : ["./index.ts"]);
 		for (const fileName of readdirSync(packageDir)) {
 			if (fileName === "index.ts") discoveredEntrypoints.push(`${packageName}/${fileName}`);
 		}
